@@ -10,9 +10,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ambitechstrous/vod-reviewer-coach/internal/handlers"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
-	"github.com/josemvargas94/vod-reviewer-coach/internal/handlers"
 )
 
 func main() {

@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/josemvargas94/vod-reviewer-coach/internal/storage"
+	"github.com/ambitechstrous/vod-reviewer-coach/internal/storage"
 )
 
 type ExtractorHandler struct {
