@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 
-	"github.com/josemvargas94/vod-reviewer-coach/internal/handlers"
+	"github.com/ambitechstrous/vod-reviewer-coach/internal/handlers"
 )
 
 func main() {
