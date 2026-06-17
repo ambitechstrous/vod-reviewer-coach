@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"log"
 	"mime"
 	"net/http"
 	"os"
@@ -16,8 +17,12 @@ type AnalyzeRequest struct {
 
 func (h *HttpHandler) Analyze(w http.ResponseWriter, r *http.Request) {
 	var req AnalyzeRequest
-	json.NewDecoder(r.Body).Decode(&req)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
 
+	log.Printf("Received analyze request: %+v\n", req)
 	reader, err := os.Open(req.FilePath)
 	if err != nil {
 		http.Error(w, "failed to open file: "+err.Error(), http.StatusInternalServerError)
