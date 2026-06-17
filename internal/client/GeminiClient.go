@@ -1,5 +1,84 @@
 package client
 
-// Client for Gemini API interactions, such as fetching VOD metadata, downloading VODs, etc.
+import (
+	"context"
+	"fmt"
+	"io"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/google/generative-ai-go/genai"
+	"google.golang.org/api/option"
+)
+
+const model = "gemini-2.0-flash"
+
 type GeminiClient struct {
+	client *genai.Client
+}
+
+func NewGeminiClient(ctx context.Context) (*GeminiClient, error) {
+	apiKey := os.Getenv("GEMINI_API_KEY")
+	if apiKey == "" {
+		return nil, fmt.Errorf("GEMINI_API_KEY is not set")
+	}
+	c, err := genai.NewClient(ctx, option.WithAPIKey(apiKey))
+	if err != nil {
+		return nil, fmt.Errorf("create gemini client: %w", err)
+	}
+	return &GeminiClient{client: c}, nil
+}
+
+// AnalyzeVideo uploads the video to Gemini's File API, waits for it to be
+// processed, then generates a response using the given prompt. The uploaded
+// file is deleted from the File API once analysis is complete.
+func (c *GeminiClient) AnalyzeVideo(ctx context.Context, r io.Reader, mimeType, prompt string) (string, error) {
+	file, err := c.client.UploadFile(ctx, "", r, &genai.UploadFileOptions{MIMEType: mimeType})
+	if err != nil {
+		return "", fmt.Errorf("upload video: %w", err)
+	}
+	defer c.client.DeleteFile(ctx, file.Name) //nolint:errcheck
+
+	// File API processes uploads asynchronously; poll until ready.
+	for file.State == genai.FileStateProcessing {
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(5 * time.Second):
+		}
+		file, err = c.client.GetFile(ctx, file.Name)
+		if err != nil {
+			return "", fmt.Errorf("poll file status: %w", err)
+		}
+	}
+	if file.State != genai.FileStateActive {
+		return "", fmt.Errorf("video processing failed (state: %v)", file.State)
+	}
+
+	resp, err := c.client.GenerativeModel(model).GenerateContent(
+		ctx,
+		genai.FileData{URI: file.URI, MIMEType: mimeType},
+		genai.Text(prompt),
+	)
+	if err != nil {
+		return "", fmt.Errorf("generate content: %w", err)
+	}
+
+	return extractText(resp), nil
+}
+
+func extractText(resp *genai.GenerateContentResponse) string {
+	var sb strings.Builder
+	for _, candidate := range resp.Candidates {
+		if candidate.Content == nil {
+			continue
+		}
+		for _, part := range candidate.Content.Parts {
+			if t, ok := part.(genai.Text); ok {
+				sb.WriteString(string(t))
+			}
+		}
+	}
+	return sb.String()
 }
