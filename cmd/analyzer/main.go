@@ -2,51 +2,35 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
 	"github.com/ambitechstrous/vod-reviewer-coach/internal/handlers"
-	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
+	"github.com/joho/godotenv"
 )
 
 func main() {
-	r := chi.NewRouter()
-
-	r.Use(middleware.Logger)
-	r.Use(middleware.Recoverer)
-
-	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
-
-	r.Post("/analyze", handlers.Analyze)
-
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
+	err := godotenv.Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "analyzer: failed to load .env file: %v\n", err)
+		os.Exit(1)
 	}
 
-	srv := &http.Server{
-		Addr:    ":" + port,
-		Handler: r,
+	httpHandler, err := handlers.NewHttpHandler(context.Background())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "analyzer: failed to create HTTP handler: %v\n", err)
+		os.Exit(1)
 	}
+
+	srv := httpHandler.SetUpRouter()
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	go func() {
-		fmt.Printf("analyzer listening on :%s\n", port)
-		if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
-			fmt.Fprintf(os.Stderr, "analyzer: %v\n", err)
-			os.Exit(1)
-		}
-	}()
+	go httpHandler.Start()
 
 	<-ctx.Done()
 
