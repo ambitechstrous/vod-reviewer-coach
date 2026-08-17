@@ -12,7 +12,7 @@ import (
 	"google.golang.org/api/option"
 )
 
-const model = "gemini-2.0-flash"
+const model = "gemini-3.6-flash"
 
 type GeminiClient struct {
 	client *genai.Client
@@ -64,6 +64,13 @@ func (c *GeminiClient) AnalyzeVideo(ctx context.Context, r io.Reader, mimeType, 
 	if err != nil {
 		return "", fmt.Errorf("generate content: %w", err)
 	}
+
+	fmt.Printf(
+		"Prompt Tokens: %d, Cached Tokens: %d, Candidate Tokens: %d, Total Tokens: %d",
+		resp.UsageMetadata.PromptTokenCount,
+		resp.UsageMetadata.CachedContentTokenCount,
+		resp.UsageMetadata.CandidatesTokenCount,
+		resp.UsageMetadata.TotalTokenCount)
 
 	return extractText(resp), nil
 }

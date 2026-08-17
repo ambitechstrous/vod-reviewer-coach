@@ -61,7 +61,7 @@ func (h *HttpHandler) SetUpRouter() *http.Server {
 }
 
 func (h *HttpHandler) Start() {
-	fmt.Printf("analyzer listening on :%s\n", os.Getenv("PORT"))
+	fmt.Printf("analyzer listening on %s\n", h.srv.Addr)
 	if err := h.srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 		fmt.Fprintf(os.Stderr, "analyzer: %v\n", err)
 		os.Exit(1)
