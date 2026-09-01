@@ -70,7 +70,8 @@ A React + TypeScript single-page app (Vite, Tailwind v4, React Router) that will
 
 ```
 cmd/
-  analyzer/     # HTTP service — chi router
+  server/       # HTTP service — chi router. Primary backend server for application.
+  analyzer/     # Event-driven — Lambda or standalone binary. Runs core analysis logic.
   extractor/    # Event-driven — Lambda or standalone binary
   sampler/      # Event-driven — Lambda or standalone binary
 internal/
