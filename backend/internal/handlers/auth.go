@@ -35,6 +35,7 @@ func (h *HttpHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// TODO: Check an actual database of email/passwords
 	token, err := auth.IssueToken(req.Email)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)

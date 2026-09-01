@@ -32,6 +32,8 @@ type IHttpHandler interface {
 	CompleteUpload(w http.ResponseWriter, r *http.Request)
 	// AbortUpload cancels an in-progress multipart upload.
 	AbortUpload(w http.ResponseWriter, r *http.Request)
+	// GetUserVideos gets a list view of all videos for a given user
+	GetUserVideos(w http.ResponseWriter, r *http.Request)
 }
 
 type HttpHandler struct {
@@ -83,6 +85,7 @@ func (h *HttpHandler) SetUpRouter() *http.Server {
 		r.Post("/uploads", h.CreateUploadSession)
 		r.Post("/uploads/complete", h.CompleteUpload)
 		r.Post("/uploads/abort", h.AbortUpload)
+		r.Get("/videos", h.GetUserVideos)
 	})
 
 	port := os.Getenv("PORT")
