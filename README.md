@@ -4,7 +4,7 @@ An AI pipeline that reviews gameplay VODs and coaches players on habits and deci
 
 ## Architecture
 
-The pipeline is built as three independent Go services under `cmd/`. They share a single Go module and common packages under `internal/`. Each event-driven service (`sampler`, `extractor`) can run as an AWS Lambda or a standalone binary — the entry point detects the runtime automatically. The `analyzer` runs as a persistent HTTP service.
+The backend is split across four independent Go services under `cmd/`, sharing a single Go module and common packages under `internal/`. `sampler`, `extractor`, and `analyzer` are event-driven and each can run as an AWS Lambda or a standalone binary — the entry point detects the runtime automatically. `server` is the one persistent HTTP service; it's not a pipeline stage itself, it's the API the frontend talks to directly (auth, uploads, video listing), and it's what accepts the initial upload and will eventually serve the finished feedback back to the player.
 
 ```
 Upload → Sampler → Extractor → Analyzer → Feedback
@@ -13,6 +13,19 @@ Upload → Sampler → Extractor → Analyzer → Feedback
 ---
 
 ## Services
+
+### Server (`cmd/server`)
+
+**Runtime:** persistent HTTP service (chi router)
+
+The backend API the frontend talks to directly. Not itself a pipeline stage — it's the entry/exit point around it:
+
+- **Auth** — `POST /auth/login` issues a session token; `GET /auth/verify` confirms one is still valid
+- **Uploads** — `POST /uploads`, `/uploads/complete`, `/uploads/abort` drive the multipart upload flow (presigned S3 part URLs)
+- **Videos** — `GET /videos` and `GET /videos/{videoName}` list and fetch a user's videos from S3
+- **Analyze** — `POST /analyze` currently runs the LLM analysis synchronously over HTTP as a stand-in for the SQS-triggered `analyzer` Lambda described below (see `TODO.md`)
+
+---
 
 ### Sampler (`cmd/sampler`)
 
@@ -44,7 +57,7 @@ Takes the Sampler's output and extracts structured, timestamped information from
 
 **Input:** the transcript and game state stream from the Extractor
 
-**Runtime:** HTTP service (chi router)
+**Runtime:** event-driven — Lambda or standalone binary (like `sampler`/`extractor`)
 
 The final stage. Takes the full picture of what happened in the match — what was said, where everyone was, and how the game unfolded — and feeds it into an LLM to produce structured coaching feedback:
 
@@ -54,11 +67,13 @@ The final stage. Takes the full picture of what happened in the match — what w
 
 **Output:** a coaching report delivered back to the player.
 
+**Status:** not implemented yet — `cmd/analyzer/main.go` is currently a placeholder stub. Getting it running as a real SQS-triggered Lambda (plus a local poller to test that flow) is tracked in `TODO.md`. Until then, `server`'s `POST /analyze` provides the same analysis synchronously over HTTP.
+
 ---
 
 ### Frontend (`frontend/`)
 
-A React + TypeScript single-page app (Vite, Tailwind v4, React Router) that will sit in front of the pipeline. It is currently scaffolded against mock data while the backend's video/user schemas are still being built out.
+A React + TypeScript single-page app (Vite, Tailwind v4, React Router) that sits in front of the pipeline, talking to `server`. Auth, uploads, and video list/detail are wired to real backend endpoints — most video metadata (game, duration, thumbnail) is still placeholder data pending the database work in `TODO.md`, since it isn't tracked anywhere yet.
 
 - **Landing page** — list of uploaded videos (thumbnail + status: `uploaded` / `analyzing` / `processed`) with a chat panel below for asking an AI coach about gameplay.
 - **Video detail page** — video player, title, status, and the coaching summary once analysis is `processed`.
@@ -77,7 +92,7 @@ cmd/
 internal/
   handlers/     # Handler interface, per-service business logic
   storage/      # S3 client (video streaming, presigned URLs, audio/image uploads)
-frontend/       # React + Vite + TypeScript SPA (mock data for now)
+frontend/       # React + Vite + TypeScript SPA
 ```
 
 ## Local Setup
@@ -103,7 +118,7 @@ VITE_API_BASE_URL=http://localhost:8080
 Requires Go 1.26+. Config comes from environment variables — create `backend/.env` (already gitignored):
 
 ```
-# Gemini — required by the analyzer's /analyze endpoint
+# Gemini — required by the /analyze endpoint (served by cmd/server)
 GEMINI_API_KEY=your-gemini-api-key
 
 # S3 / MinIO — see the MinIO section below
@@ -125,16 +140,18 @@ Then run the HTTP service the frontend talks to:
 
 ```bash
 cd backend
-go run ./cmd/analyzer        # listens on :8080
-PORT=9090 go run ./cmd/analyzer   # or a different port
+go run ./cmd/server        # listens on :8080
+PORT=9090 go run ./cmd/server   # or a different port
 ```
 
-`sampler` and `extractor` aren't wired into the frontend yet, but run the same way, standalone, reading a JSON payload from stdin:
+`sampler`, `extractor`, and `analyzer` aren't wired into the frontend yet. `sampler` and `extractor` can be run standalone, reading a JSON payload from stdin:
 
 ```bash
 echo '{"video_id":"abc123"}' | go run ./cmd/sampler
 echo '{"match_id":"abc123"}' | go run ./cmd/extractor
 ```
+
+`analyzer` is currently a placeholder stub (see `TODO.md`) — it isn't wired to real Lambda logic yet, so there's no meaningful payload to run it with.
 
 ### 3. MinIO (S3 emulation)
 
