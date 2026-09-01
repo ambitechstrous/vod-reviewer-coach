@@ -27,6 +27,7 @@ type contextKey string
 
 const userIDContextKey contextKey = "userID"
 
+// FIXME: Use real secrets instead of local env vars for JWTs. Issuing and validating should use separate secret keys.
 func secret() ([]byte, error) {
 	s := os.Getenv("JWT_SECRET")
 	if s == "" {
@@ -55,8 +56,7 @@ func IssueToken(userID string) (string, error) {
 	return signed, nil
 }
 
-// VerifyToken validates a signed token's signature and expiry, and returns
-// the user ID it was issued for.
+// VerifyToken validates a signed token's signature and expiry, and returns the user ID it was issued for.
 func VerifyToken(tokenString string) (string, error) {
 	key, err := secret()
 	if err != nil {

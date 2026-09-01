@@ -4,6 +4,7 @@ import {
   abortUploadSession,
   createUploadSession,
   finishUploadSession,
+  SessionExpiredError,
   type UploadSession,
 } from '../lib/upload'
 
@@ -22,7 +23,7 @@ function formatBytes(bytes: number): string {
 }
 
 export function UploadVideoPanel({ onClose }: { onClose: () => void }) {
-  const { user } = useAuth()
+  const { user, logout } = useAuth()
   const [file, setFile] = useState<File | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [session, setSession] = useState<UploadSession | null>(null)
@@ -75,6 +76,10 @@ export function UploadVideoPanel({ onClose }: { onClose: () => void }) {
       setSession(newSession)
       setStatus('ready')
     } catch (err) {
+      if (err instanceof SessionExpiredError) {
+        logout()
+        return
+      }
       setStatus('error')
       setError(err instanceof Error ? err.message : 'Failed to start upload')
     }
@@ -128,6 +133,10 @@ export function UploadVideoPanel({ onClose }: { onClose: () => void }) {
     } catch (err) {
       // finishUploadSession already aborted the session on failure.
       setSession(null)
+      if (err instanceof SessionExpiredError) {
+        logout()
+        return
+      }
       setStatus('error')
       setError(err instanceof Error ? err.message : 'Upload failed')
     }

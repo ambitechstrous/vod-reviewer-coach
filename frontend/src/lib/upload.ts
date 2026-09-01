@@ -29,6 +29,14 @@ export interface UploadProgress {
   totalBytes: number
 }
 
+/** Thrown when the backend rejects a request's token (missing, expired, or invalid). */
+export class SessionExpiredError extends Error {
+  constructor() {
+    super('Session expired — please log in again.')
+    this.name = 'SessionExpiredError'
+  }
+}
+
 /**
  * Starts a multipart upload session and returns a presigned URL for every
  * part. `videoName` is namespaced by the authenticated user server-side, so
@@ -55,6 +63,7 @@ export async function createUploadSession(
     signal,
   })
 
+  if (res.status === 401) throw new SessionExpiredError()
   if (!res.ok) {
     throw new Error(`failed to create upload session: ${res.status} ${await res.text()}`)
   }
@@ -173,6 +182,7 @@ async function completeUploadSession(
     signal,
   })
 
+  if (res.status === 401) throw new SessionExpiredError()
   if (!res.ok) {
     throw new Error(`failed to complete upload: ${res.status} ${await res.text()}`)
   }

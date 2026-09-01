@@ -24,6 +24,8 @@ type IHttpHandler interface {
 	Analyze(w http.ResponseWriter, r *http.Request)
 	// Login issues a session token for an email.
 	Login(w http.ResponseWriter, r *http.Request)
+	// Verify confirms the caller's session token is still valid.
+	Verify(w http.ResponseWriter, r *http.Request)
 	// CreateUploadSession starts a multipart upload and returns presigned part URLs.
 	CreateUploadSession(w http.ResponseWriter, r *http.Request)
 	// CompleteUpload finalizes a multipart upload once all parts are uploaded.
@@ -74,8 +76,10 @@ func (h *HttpHandler) SetUpRouter() *http.Server {
 
 	r.Post("/auth/login", h.Login)
 
+	// TODO: Should we require auth for ALL Requests, or keep as group due to circular issue with login endpoint?
 	r.Group(func(r chi.Router) {
 		r.Use(requireAuth)
+		r.Get("/auth/verify", h.Verify)
 		r.Post("/uploads", h.CreateUploadSession)
 		r.Post("/uploads/complete", h.CompleteUpload)
 		r.Post("/uploads/abort", h.AbortUpload)
