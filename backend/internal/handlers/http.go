@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"github.com/ambitechstrous/vod-reviewer-coach/internal/client"
+	"github.com/ambitechstrous/vod-reviewer-coach/internal/storage"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 )
@@ -19,10 +20,17 @@ type IHttpHandler interface {
 	Start()
 	// Analyze is the endpoint for handling the analyze route.
 	Analyze(w http.ResponseWriter, r *http.Request)
+	// CreateUploadSession starts a multipart upload and returns presigned part URLs.
+	CreateUploadSession(w http.ResponseWriter, r *http.Request)
+	// CompleteUpload finalizes a multipart upload once all parts are uploaded.
+	CompleteUpload(w http.ResponseWriter, r *http.Request)
+	// AbortUpload cancels an in-progress multipart upload.
+	AbortUpload(w http.ResponseWriter, r *http.Request)
 }
 
 type HttpHandler struct {
 	geminiClient *client.GeminiClient
+	s3Client     *storage.S3Client
 	srv          *http.Server
 }
 
@@ -31,8 +39,13 @@ func NewHttpHandler(ctx context.Context) (IHttpHandler, error) {
 	if err != nil {
 		return nil, err
 	}
+	s3Client, err := storage.NewS3Client(ctx, "user-vods")
+	if err != nil {
+		return nil, err
+	}
 	return &HttpHandler{
 		geminiClient: geminiClient,
+		s3Client:     s3Client,
 	}, nil
 }
 
@@ -47,6 +60,10 @@ func (h *HttpHandler) SetUpRouter() *http.Server {
 	})
 
 	r.Post("/analyze", h.Analyze)
+
+	r.Post("/uploads", h.CreateUploadSession)
+	r.Post("/uploads/complete", h.CompleteUpload)
+	r.Post("/uploads/abort", h.AbortUpload)
 
 	port := os.Getenv("PORT")
 	if port == "" {

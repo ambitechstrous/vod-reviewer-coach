@@ -11,6 +11,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 )
 
 type S3Client struct {
@@ -49,6 +50,83 @@ func (c *S3Client) PresignGetVideo(ctx context.Context, key string, ttl time.Dur
 		return "", fmt.Errorf("presign video %q: %w", key, err)
 	}
 	return req.URL, nil
+}
+
+// CompletedPart identifies one successfully uploaded part of a multipart
+// upload, as reported back by the client after each part PUT.
+type CompletedPart struct {
+	PartNumber int32
+	ETag       string
+}
+
+// CreateMultipartUpload starts a multipart upload for key and returns the
+// upload ID clients need to presign and complete/abort it.
+func (c *S3Client) CreateMultipartUpload(ctx context.Context, key, contentType string) (string, error) {
+	out, err := c.client.CreateMultipartUpload(ctx, &s3.CreateMultipartUploadInput{
+		Bucket:      aws.String(c.bucket),
+		Key:         aws.String(key),
+		ContentType: aws.String(contentType),
+	})
+	if err != nil {
+		return "", fmt.Errorf("create multipart upload %q: %w", key, err)
+	}
+	return aws.ToString(out.UploadId), nil
+}
+
+// PresignUploadPart returns a time-limited URL the client can PUT a single
+// part's bytes to directly.
+func (c *S3Client) PresignUploadPart(ctx context.Context, key, uploadID string, partNumber int32, ttl time.Duration) (string, error) {
+	pc := s3.NewPresignClient(c.client)
+	req, err := pc.PresignUploadPart(ctx, &s3.UploadPartInput{
+		Bucket:     aws.String(c.bucket),
+		Key:        aws.String(key),
+		UploadId:   aws.String(uploadID),
+		PartNumber: aws.Int32(partNumber),
+	}, s3.WithPresignExpires(ttl))
+	if err != nil {
+		return "", fmt.Errorf("presign upload part %q (part %d): %w", key, partNumber, err)
+	}
+	return req.URL, nil
+}
+
+// CompleteMultipartUpload finalizes a multipart upload once every part has
+// been uploaded. parts must be sorted by PartNumber.
+func (c *S3Client) CompleteMultipartUpload(ctx context.Context, key, uploadID string, parts []CompletedPart) error {
+	completed := make([]types.CompletedPart, len(parts))
+	for i, p := range parts {
+		completed[i] = types.CompletedPart{
+			PartNumber: aws.Int32(p.PartNumber),
+			ETag:       aws.String(p.ETag),
+		}
+	}
+
+	_, err := c.client.CompleteMultipartUpload(ctx, &s3.CompleteMultipartUploadInput{
+		Bucket:   aws.String(c.bucket),
+		Key:      aws.String(key),
+		UploadId: aws.String(uploadID),
+		MultipartUpload: &types.CompletedMultipartUpload{
+			Parts: completed,
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("complete multipart upload %q: %w", key, err)
+	}
+	return nil
+}
+
+// AbortMultipartUpload cancels an in-progress multipart upload and releases
+// any parts already uploaded, so it should be called whenever a client gives
+// up partway through (network failure, user cancels, etc).
+func (c *S3Client) AbortMultipartUpload(ctx context.Context, key, uploadID string) error {
+	_, err := c.client.AbortMultipartUpload(ctx, &s3.AbortMultipartUploadInput{
+		Bucket:   aws.String(c.bucket),
+		Key:      aws.String(key),
+		UploadId: aws.String(uploadID),
+	})
+	if err != nil {
+		return fmt.Errorf("abort multipart upload %q: %w", key, err)
+	}
+	return nil
 }
 
 // PutAudio uploads an audio file to S3 under the given key.
