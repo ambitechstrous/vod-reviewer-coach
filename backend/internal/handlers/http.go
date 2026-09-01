@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/ambitechstrous/vod-reviewer-coach/internal/client"
 	"github.com/ambitechstrous/vod-reviewer-coach/internal/storage"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/go-chi/cors"
 )
 
 type IHttpHandler interface {
@@ -54,6 +56,13 @@ func (h *HttpHandler) SetUpRouter() *http.Server {
 
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
+	r.Use(cors.Handler(cors.Options{
+		AllowedOrigins:   allowedOrigins(),
+		AllowedMethods:   []string{http.MethodGet, http.MethodPost},
+		AllowedHeaders:   []string{"Content-Type"},
+		AllowCredentials: false,
+		MaxAge:           300,
+	}))
 
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -75,6 +84,22 @@ func (h *HttpHandler) SetUpRouter() *http.Server {
 		Handler: r,
 	}
 	return h.srv
+}
+
+// allowedOrigins returns the browser origins allowed to call this API,
+// read as a comma-separated list from CORS_ALLOWED_ORIGINS (e.g. the
+// deployed frontend's URL), falling back to the local Vite dev server.
+func allowedOrigins() []string {
+	raw := os.Getenv("CORS_ALLOWED_ORIGINS")
+	if raw == "" {
+		return []string{"http://localhost:5173"}
+	}
+
+	origins := strings.Split(raw, ",")
+	for i, o := range origins {
+		origins[i] = strings.TrimSpace(o)
+	}
+	return origins
 }
 
 func (h *HttpHandler) Start() {

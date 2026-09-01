@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"mime"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -32,8 +33,18 @@ func NewS3Client(ctx context.Context, bucket string) (*S3Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("load aws config: %w", err)
 	}
+
+	// AWS_ENDPOINT_URL (read automatically by config.LoadDefaultConfig) points
+	// the SDK at a non-AWS endpoint like MinIO for local development. MinIO
+	// only understands path-style requests (host/bucket/key), not the
+	// virtual-hosted style (bucket.host/key) the SDK defaults to, so that
+	// must be opted into separately here.
+	usePathStyle := os.Getenv("S3_FORCE_PATH_STYLE") == "true"
+
 	return &S3Client{
-		client: s3.NewFromConfig(cfg),
+		client: s3.NewFromConfig(cfg, func(o *s3.Options) {
+			o.UsePathStyle = usePathStyle
+		}),
 		bucket: bucket,
 	}, nil
 }

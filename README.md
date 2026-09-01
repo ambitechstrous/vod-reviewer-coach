@@ -79,29 +79,102 @@ internal/
 frontend/       # React + Vite + TypeScript SPA (mock data for now)
 ```
 
-## Running Locally
+## Local Setup
 
-Event-driven services read a JSON payload from stdin when run outside Lambda:
+Everything below assumes you're starting from the repo root. There are three pieces to get running: the frontend, the backend, and (if you want uploads to actually work end to end) a local S3-compatible store via MinIO.
 
-```bash
-# No payload
-go run ./cmd/sampler
-
-# With a payload
-echo '{"video_id":"abc123"}' | go run ./cmd/sampler
-```
-
-The HTTP service:
-
-```bash
-go run ./cmd/analyzer        # listens on :8080
-PORT=9090 go run ./cmd/analyzer
-```
-
-The frontend:
+### 1. Frontend
 
 ```bash
 cd frontend
 npm install
 npm run dev           # http://localhost:5173
 ```
+
+By default it talks to the backend at `http://localhost:8080`. Override that with `frontend/.env`:
+
+```
+VITE_API_BASE_URL=http://localhost:8080
+```
+
+### 2. Backend
+
+Requires Go 1.26+. Config comes from environment variables — create `backend/.env` (already gitignored):
+
+```
+# Gemini — required by the analyzer's /analyze endpoint
+GEMINI_API_KEY=your-gemini-api-key
+
+# S3 / MinIO — see the MinIO section below
+AWS_ACCESS_KEY_ID=minioadmin
+AWS_SECRET_ACCESS_KEY=minioadmin
+AWS_REGION=us-east-1
+AWS_ENDPOINT_URL=http://localhost:9000
+S3_FORCE_PATH_STYLE=true
+
+# Origins allowed to call the API (comma-separated)
+CORS_ALLOWED_ORIGINS=http://localhost:5173
+```
+
+Then run the HTTP service the frontend talks to:
+
+```bash
+cd backend
+go run ./cmd/analyzer        # listens on :8080
+PORT=9090 go run ./cmd/analyzer   # or a different port
+```
+
+`sampler` and `extractor` aren't wired into the frontend yet, but run the same way, standalone, reading a JSON payload from stdin:
+
+```bash
+echo '{"video_id":"abc123"}' | go run ./cmd/sampler
+echo '{"match_id":"abc123"}' | go run ./cmd/extractor
+```
+
+### 3. MinIO (S3 emulation)
+
+The backend talks to storage through the AWS S3 SDK, which MinIO also speaks, so pointing it at a local MinIO instance instead of real AWS is just the `AWS_ENDPOINT_URL` and `S3_FORCE_PATH_STYLE` env vars already shown above — no code changes needed. (`S3_FORCE_PATH_STYLE=true` matters: MinIO expects path-style requests — `host/bucket/key` — rather than the virtual-hosted-style, `bucket.host/key`, the AWS SDK defaults to.)
+
+Run MinIO via Docker:
+
+```bash
+docker run -p 9000:9000 -p 9001:9001 \
+  -e MINIO_ROOT_USER=minioadmin \
+  -e MINIO_ROOT_PASSWORD=<choose your password> \
+  minio/minio server /data --console-address ":9001"
+```
+
+- API: `http://localhost:9000` — this is what `AWS_ENDPOINT_URL` points at
+- Console: `http://localhost:9001` — log in with `minioadmin` / `minioadmin`
+
+Create the bucket the backend expects. The bucket name (`user-vods`) is hardcoded in `backend/internal/storage/s3.go`:
+
+```bash
+mc alias set local http://localhost:9000 minioadmin minioadmin
+mc mb local/user-vods
+```
+
+(Or create it from the console at `http://localhost:9001` instead of using `mc`.)
+
+**Multipart uploads also need CORS enabled on the bucket.** The upload panel PUTs each part directly from the browser to S3/MinIO, bypassing the backend entirely, so the bucket itself — not the Go server — has to allow cross-origin requests from the frontend and expose the `ETag` header the frontend reads back after each part:
+
+```json
+{
+  "CORSRules": [
+    {
+      "AllowedOrigins": ["http://localhost:5173"],
+      "AllowedMethods": ["PUT", "GET"],
+      "AllowedHeaders": ["*"],
+      "ExposeHeaders": ["ETag"]
+    }
+  ]
+}
+```
+
+```bash
+mc cors set local/user-vods cors.json   # flags vary by mc version — check `mc cors --help`
+```
+
+After doing the above set up, you can finally run `docker start minio` to spin up the container. To stop minio, simply run `docker stop minio`.
+
+With MinIO, the backend, and the frontend all running, dropping a video into the upload panel drives a real multipart upload against your local bucket.
