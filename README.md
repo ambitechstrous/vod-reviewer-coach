@@ -106,11 +106,10 @@ Requires Go 1.26+. Config comes from environment variables — create `backend/.
 GEMINI_API_KEY=your-gemini-api-key
 
 # S3 / MinIO — see the MinIO section below
-AWS_ACCESS_KEY_ID=minioadmin
-AWS_SECRET_ACCESS_KEY=minioadmin
 AWS_REGION=us-east-1
-AWS_ENDPOINT_URL=http://localhost:9000
-S3_FORCE_PATH_STYLE=true
+ENVIRONMENT=development
+MINIO_USER=admin
+MINIO_PASSWORD=<your password here>
 
 # Origins allowed to call the API (comma-separated)
 CORS_ALLOWED_ORIGINS=http://localhost:5173
