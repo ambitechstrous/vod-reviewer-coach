@@ -1,15 +1,51 @@
+import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { StatusBadge } from '../components/StatusBadge'
-import { mockVideos } from '../data/mockVideos'
+import { SessionExpiredError } from '../lib/api'
+import { useAuth } from '../lib/auth'
+import { fetchVideoDetails } from '../lib/videos'
+import type { Video } from '../types'
 
 export function VideoDetailPage() {
   const { videoId } = useParams<{ videoId: string }>()
-  const video = mockVideos.find((v) => v.id === videoId)
+  const { user, logout } = useAuth()
+  const [video, setVideo] = useState<Video | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
-  if (!video) {
+  useEffect(() => {
+    if (!user || !videoId) return
+    const controller = new AbortController()
+    setIsLoading(true)
+    setError(null)
+
+    fetchVideoDetails(videoId, user.token, controller.signal)
+      .then(setVideo)
+      .catch((err) => {
+        if (controller.signal.aborted) return
+        if (err instanceof SessionExpiredError) {
+          logout()
+          return
+        }
+        setError('Could not load this video.')
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setIsLoading(false)
+      })
+
+    return () => controller.abort()
+  }, [videoId, user, logout])
+
+  if (isLoading) {
+    return <p className="text-sm text-slate-400">Loading&hellip;</p>
+  }
+
+  if (error || !video) {
     return (
       <div className="flex flex-col items-start gap-3">
-        <p className="text-slate-300">Video not found.</p>
+        <p className={error ? 'text-sm text-red-400' : 'text-slate-300'}>
+          {error ?? 'Video not found.'}
+        </p>
         <Link to="/" className="text-sm text-indigo-400 hover:underline">
           Back to videos
         </Link>
