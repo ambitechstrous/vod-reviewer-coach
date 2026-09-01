@@ -3,6 +3,8 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+
+	"github.com/go-chi/chi/v5"
 )
 
 // Video mirrors the frontend's Video type (frontend/src/types.ts) field for
@@ -89,4 +91,19 @@ var mockVideos = []Video{
 func (h *HttpHandler) GetUserVideos(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(mockVideos)
+}
+
+// GetVideoDetails gets the details of a specific video for a given user, including the summary and analysis results.
+func (h *HttpHandler) GetVideoDetails(w http.ResponseWriter, r *http.Request) {
+	videoName := chi.URLParam(r, "videoName")
+
+	for _, v := range mockVideos {
+		if v.ID == videoName {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(v)
+			return
+		}
+	}
+
+	http.Error(w, "video not found", http.StatusNotFound)
 }

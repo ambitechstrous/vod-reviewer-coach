@@ -34,6 +34,8 @@ type IHttpHandler interface {
 	AbortUpload(w http.ResponseWriter, r *http.Request)
 	// GetUserVideos gets a list view of all videos for a given user
 	GetUserVideos(w http.ResponseWriter, r *http.Request)
+	// GetVideoDetails gets the details of a specific video for a given user
+	GetVideoDetails(w http.ResponseWriter, r *http.Request)
 }
 
 type HttpHandler struct {
@@ -86,6 +88,7 @@ func (h *HttpHandler) SetUpRouter() *http.Server {
 		r.Post("/uploads/complete", h.CompleteUpload)
 		r.Post("/uploads/abort", h.AbortUpload)
 		r.Get("/videos", h.GetUserVideos)
+		r.Get("/videos/{videoName}", h.GetVideoDetails)
 	})
 
 	port := os.Getenv("PORT")
