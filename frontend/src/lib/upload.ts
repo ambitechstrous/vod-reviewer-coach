@@ -1,4 +1,4 @@
-import { API_BASE_URL } from './api'
+import { API_BASE_URL, SessionExpiredError } from './api'
 
 // How many parts to upload to S3 in parallel. Multipart upload's main
 // benefit over a single PUT is that parts can go out concurrently.
@@ -27,14 +27,6 @@ export interface UploadSession {
 export interface UploadProgress {
   uploadedBytes: number
   totalBytes: number
-}
-
-/** Thrown when the backend rejects a request's token (missing, expired, or invalid). */
-export class SessionExpiredError extends Error {
-  constructor() {
-    super('Session expired — please log in again.')
-    this.name = 'SessionExpiredError'
-  }
 }
 
 /**

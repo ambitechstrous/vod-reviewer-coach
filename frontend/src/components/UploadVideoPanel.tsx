@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState, type DragEvent } from 'react'
+import { SessionExpiredError } from '../lib/api'
 import { useAuth } from '../lib/auth'
 import {
   abortUploadSession,
   createUploadSession,
   finishUploadSession,
-  SessionExpiredError,
   type UploadSession,
 } from '../lib/upload'
 
