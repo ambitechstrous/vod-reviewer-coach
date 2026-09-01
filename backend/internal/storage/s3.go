@@ -17,8 +17,9 @@ import (
 )
 
 type S3Client struct {
-	client *s3.Client
-	bucket string
+	client   *s3.Client
+	psClient *s3.PresignClient
+	bucket   string
 }
 
 // VideoFile holds the streaming body and content metadata for a video object.
@@ -29,33 +30,74 @@ type VideoFile struct {
 	ContentLength int64
 }
 
+// VideoInfo holds relevant metadata and a presigned URL to fetch the video object.
+type VideoInfo struct {
+	Key          string `json:"key"`
+	LastModified string `json:"last_modified"`
+	URL          string `json:"url"`
+}
+
 func NewS3Client(ctx context.Context, bucket string) (*S3Client, error) {
 	cfg, err := config.LoadDefaultConfig(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("load aws config: %w", err)
 	}
 
-	return &S3Client{
-		client: s3.NewFromConfig(cfg, func(o *s3.Options) {
-			// Override to local S3 instance for local development environments
-			env := os.Getenv("ENVIRONMENT")
-			if env == "development" || env == "test" {
-				o.UsePathStyle = true
-				o.BaseEndpoint = aws.String("http://localhost:9000")
+	client := s3.NewFromConfig(cfg, func(o *s3.Options) {
+		// Override to local S3 instance for local development environments
+		env := os.Getenv("ENVIRONMENT")
+		if env == "development" || env == "test" {
+			o.UsePathStyle = true
+			o.BaseEndpoint = aws.String("http://localhost:9000")
 
-				user, password := os.Getenv("MINIO_USER"), os.Getenv("MINIO_PASSWORD")
-				o.Credentials = credentials.NewStaticCredentialsProvider(user, password, "")
-			}
-		}),
-		bucket: bucket,
+			user, password := os.Getenv("MINIO_USER"), os.Getenv("MINIO_PASSWORD")
+			o.Credentials = credentials.NewStaticCredentialsProvider(user, password, "")
+		}
+	})
+	return &S3Client{
+		client:   client,
+		psClient: s3.NewPresignClient(client),
+		bucket:   bucket,
 	}, nil
 }
 
-// PresignGetVideo returns a time-limited URL that grants read access to a
-// single video object. Keep ttl short (5–15 min) and never log the URL.
-func (c *S3Client) PresignGetVideo(ctx context.Context, key string, ttl time.Duration) (string, error) {
-	pc := s3.NewPresignClient(c.client)
-	req, err := pc.PresignGetObject(ctx, &s3.GetObjectInput{
+// ListVideos lists all video objects in the S3 bucket for a given user, identified by userID. It returns a slice of VideoFile metadata.
+func (c *S3Client) ListVideos(ctx context.Context, userID string) ([]VideoInfo, error) {
+	prefix := fmt.Sprintf("%s/", userID)
+	var videos []VideoInfo
+
+	paginator := s3.NewListObjectsV2Paginator(c.client, &s3.ListObjectsV2Input{
+		Bucket: aws.String(c.bucket),
+		Prefix: aws.String(prefix),
+	})
+
+	for paginator.HasMorePages() {
+		page, err := paginator.NextPage(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("list objects: %w", err)
+		}
+
+		for _, obj := range page.Contents {
+			key := aws.ToString(obj.Key)
+			url, err := c.GetPresignedURL(ctx, key, 5*time.Minute)
+			if err != nil {
+				return nil, fmt.Errorf("presign get video: %w", err)
+			}
+
+			videos = append(videos, VideoInfo{
+				Key:          key,
+				LastModified: obj.LastModified.Format(time.RFC3339),
+				URL:          url,
+			})
+		}
+	}
+
+	return videos, nil
+}
+
+// GetPresignedURL returns a time-limited URL that grants read access to a single video object. Keep ttl short (5–15 min) and never log the URL.
+func (c *S3Client) GetPresignedURL(ctx context.Context, key string, ttl time.Duration) (string, error) {
+	req, err := c.psClient.PresignGetObject(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(c.bucket),
 		Key:    aws.String(key),
 	}, s3.WithPresignExpires(ttl))
