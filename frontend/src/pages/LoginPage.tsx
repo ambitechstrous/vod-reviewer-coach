@@ -8,14 +8,24 @@ export function LoginPage() {
   const location = useLocation()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   const from = (location.state as { from?: Location })?.from?.pathname ?? '/'
 
-  function handleSubmit(e: SubmitEvent<HTMLFormElement>) {
+  async function handleSubmit(e: SubmitEvent<HTMLFormElement>) {
     e.preventDefault()
-    if (!email.trim()) return
-    login(email.trim())
-    navigate(from, { replace: true })
+    if (!email.trim() || isSubmitting) return
+
+    setIsSubmitting(true)
+    setError(null)
+    try {
+      await login(email.trim())
+      navigate(from, { replace: true })
+    } catch {
+      setError('Could not log in — is the backend running?')
+      setIsSubmitting(false)
+    }
   }
 
   return (
@@ -61,11 +71,14 @@ export function LoginPage() {
             />
           </div>
 
+          {error && <p className="text-sm text-red-400">{error}</p>}
+
           <button
             type="submit"
-            className="mt-2 rounded-lg bg-indigo-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-400"
+            disabled={isSubmitting}
+            className="mt-2 rounded-lg bg-indigo-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-400 disabled:cursor-not-allowed disabled:opacity-40"
           >
-            Log in
+            {isSubmitting ? 'Logging in…' : 'Log in'}
           </button>
 
           <p className="text-center text-xs text-slate-500">

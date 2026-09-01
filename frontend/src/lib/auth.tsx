@@ -6,14 +6,16 @@ import {
   useState,
   type ReactNode,
 } from 'react'
+import { API_BASE_URL } from './api'
 
 interface AuthUser {
   email: string
+  token: string
 }
 
 interface AuthContextValue {
   user: AuthUser | null
-  login: (email: string) => void
+  login: (email: string) => Promise<void>
   logout: () => void
 }
 
@@ -38,7 +40,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const value = useMemo<AuthContextValue>(
     () => ({
       user,
-      login: (email: string) => setUser({ email }),
+      login: async (email: string) => {
+        const res = await fetch(`${API_BASE_URL}/auth/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email }),
+        })
+
+        if (!res.ok) {
+          throw new Error(`login failed: ${res.status}`)
+        }
+
+        const { token }: { token: string } = await res.json()
+        setUser({ email, token })
+      },
       logout: () => setUser(null),
     }),
     [user],

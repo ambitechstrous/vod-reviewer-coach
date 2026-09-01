@@ -1,10 +1,13 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 
+	"github.com/ambitechstrous/vod-reviewer-coach/internal/auth"
 	"github.com/ambitechstrous/vod-reviewer-coach/internal/storage"
 )
 
@@ -65,6 +68,19 @@ type CompleteUploadResponse struct {
 	Status string `json:"status"`
 }
 
+// videoKey builds the S3 key a video is stored under, namespaced by the
+// authenticated user so one user's uploads can never collide with or
+// overwrite another's. userID comes from a verified token (see
+// requireAuth), never from anything the client supplies directly.
+func videoKey(ctx context.Context, videoName string) (string, error) {
+	userID, ok := auth.UserIDFromContext(ctx)
+	if !ok {
+		return "", fmt.Errorf("unauthorized: no user ID in context")
+	}
+
+	return fmt.Sprintf("%s/%s", userID, videoName), nil
+}
+
 // CreateUploadSession starts a multipart upload for a video and returns a presigned URL for every part the client will need to PUT directly to S3.
 func (h *HttpHandler) CreateUploadSession(w http.ResponseWriter, r *http.Request) {
 	var req CreateUploadSessionRequest
@@ -80,6 +96,14 @@ func (h *HttpHandler) CreateUploadSession(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// Figure out bucket key from authenticated user context
+	ctx := r.Context()
+	key, err := videoKey(ctx, req.VideoName)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
 	// File size determines how many parts we need to upload. S3 requires at least one part, and we also enforce a maximum number of parts.
 	partCount := max(int32((req.FileSizeBytes+uploadPartSize-1)/uploadPartSize), 1)
 	if partCount > maxUploadParts {
@@ -88,8 +112,7 @@ func (h *HttpHandler) CreateUploadSession(w http.ResponseWriter, r *http.Request
 	}
 
 	// Create multi-part upload session in S3 for this video, which gives us an upload ID.
-	ctx := r.Context()
-	uploadID, err := h.s3Client.CreateMultipartUpload(ctx, req.VideoName, req.ContentType)
+	uploadID, err := h.s3Client.CreateMultipartUpload(ctx, key, req.ContentType)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -99,9 +122,9 @@ func (h *HttpHandler) CreateUploadSession(w http.ResponseWriter, r *http.Request
 	parts := make([]UploadPart, partCount)
 	for i := int32(0); i < partCount; i++ {
 		partNumber := i + 1
-		url, err := h.s3Client.PresignUploadPart(ctx, req.VideoName, uploadID, partNumber, uploadPartURLTTL)
+		url, err := h.s3Client.PresignUploadPart(ctx, key, uploadID, partNumber, uploadPartURLTTL)
 		if err != nil {
-			_ = h.s3Client.AbortMultipartUpload(ctx, req.VideoName, uploadID)
+			_ = h.s3Client.AbortMultipartUpload(ctx, key, uploadID)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -110,7 +133,7 @@ func (h *HttpHandler) CreateUploadSession(w http.ResponseWriter, r *http.Request
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(CreateUploadSessionResponse{
-		Key:      req.VideoName,
+		Key:      key,
 		UploadID: uploadID,
 		PartSize: uploadPartSize,
 		Parts:    parts,
@@ -130,25 +153,32 @@ func (h *HttpHandler) CompleteUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Figure out bucket key from authenticated user context
+	ctx := r.Context()
+	key, err := videoKey(ctx, req.VideoName)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
 	parts := make([]storage.CompletedPart, len(req.Parts))
 	for i, p := range req.Parts {
 		parts[i] = storage.CompletedPart{PartNumber: p.PartNumber, ETag: p.ETag}
 	}
 
-	if err := h.s3Client.CompleteMultipartUpload(r.Context(), req.VideoName, req.UploadID, parts); err != nil {
+	if err := h.s3Client.CompleteMultipartUpload(r.Context(), key, req.UploadID, parts); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(CompleteUploadResponse{
-		Key:    req.VideoName,
+		Key:    key,
 		Status: "uploaded",
 	})
 }
 
-// AbortUpload cancels an in-progress multipart upload, e.g. when the client
-// gives up partway through.
+// AbortUpload cancels an in-progress multipart upload, e.g. when the client gives up partway through.
 func (h *HttpHandler) AbortUpload(w http.ResponseWriter, r *http.Request) {
 	var req AbortUploadRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -161,7 +191,15 @@ func (h *HttpHandler) AbortUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.s3Client.AbortMultipartUpload(r.Context(), req.VideoName, req.UploadID); err != nil {
+	// Figure out bucket key from authenticated user context
+	ctx := r.Context()
+	key, err := videoKey(ctx, req.VideoName)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	if err := h.s3Client.AbortMultipartUpload(r.Context(), key, req.UploadID); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

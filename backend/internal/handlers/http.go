@@ -22,6 +22,8 @@ type IHttpHandler interface {
 	Start()
 	// Analyze is the endpoint for handling the analyze route.
 	Analyze(w http.ResponseWriter, r *http.Request)
+	// Login issues a session token for an email.
+	Login(w http.ResponseWriter, r *http.Request)
 	// CreateUploadSession starts a multipart upload and returns presigned part URLs.
 	CreateUploadSession(w http.ResponseWriter, r *http.Request)
 	// CompleteUpload finalizes a multipart upload once all parts are uploaded.
@@ -59,7 +61,7 @@ func (h *HttpHandler) SetUpRouter() *http.Server {
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   allowedOrigins(),
 		AllowedMethods:   []string{http.MethodGet, http.MethodPost},
-		AllowedHeaders:   []string{"Content-Type"},
+		AllowedHeaders:   []string{"Content-Type", "Authorization"},
 		AllowCredentials: false,
 		MaxAge:           300,
 	}))
@@ -70,9 +72,14 @@ func (h *HttpHandler) SetUpRouter() *http.Server {
 
 	r.Post("/analyze", h.Analyze)
 
-	r.Post("/uploads", h.CreateUploadSession)
-	r.Post("/uploads/complete", h.CompleteUpload)
-	r.Post("/uploads/abort", h.AbortUpload)
+	r.Post("/auth/login", h.Login)
+
+	r.Group(func(r chi.Router) {
+		r.Use(requireAuth)
+		r.Post("/uploads", h.CreateUploadSession)
+		r.Post("/uploads/complete", h.CompleteUpload)
+		r.Post("/uploads/abort", h.AbortUpload)
+	})
 
 	port := os.Getenv("PORT")
 	if port == "" {

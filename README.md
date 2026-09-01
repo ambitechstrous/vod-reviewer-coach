@@ -113,6 +113,11 @@ MINIO_PASSWORD=<your password here>
 
 # Origins allowed to call the API (comma-separated)
 CORS_ALLOWED_ORIGINS=http://localhost:5173
+
+# Signs session tokens issued by /auth/login — any random string works
+# locally, but keep it secret in real environments (anyone who has it can
+# mint a valid token for any user).
+JWT_SECRET=<a long random string>
 ```
 
 Then run the HTTP service the frontend talks to:

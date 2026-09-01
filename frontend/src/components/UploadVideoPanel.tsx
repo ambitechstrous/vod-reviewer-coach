@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type DragEvent } from 'react'
+import { useAuth } from '../lib/auth'
 import {
   abortUploadSession,
   createUploadSession,
@@ -21,6 +22,7 @@ function formatBytes(bytes: number): string {
 }
 
 export function UploadVideoPanel({ onClose }: { onClose: () => void }) {
+  const { user } = useAuth()
   const [file, setFile] = useState<File | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [session, setSession] = useState<UploadSession | null>(null)
@@ -43,11 +45,11 @@ export function UploadVideoPanel({ onClose }: { onClose: () => void }) {
   // user explicitly clearing or finishing the upload.
   useEffect(() => {
     return () => {
-      if (sessionRef.current && statusRef.current !== 'done') {
-        void abortUploadSession(sessionRef.current)
+      if (sessionRef.current && statusRef.current !== 'done' && user) {
+        void abortUploadSession(sessionRef.current, user.token)
       }
     }
-  }, [])
+  }, [user])
 
   useEffect(() => {
     return () => {
@@ -56,6 +58,7 @@ export function UploadVideoPanel({ onClose }: { onClose: () => void }) {
   }, [previewUrl])
 
   async function selectFile(newFile: File) {
+    if (!user) return
     if (previewUrl) URL.revokeObjectURL(previewUrl)
 
     // A new drop replaces the in-progress session without aborting the old
@@ -68,7 +71,7 @@ export function UploadVideoPanel({ onClose }: { onClose: () => void }) {
     setStatus('creating-session')
 
     try {
-      const newSession = await createUploadSession(crypto.randomUUID(), newFile)
+      const newSession = await createUploadSession(crypto.randomUUID(), newFile, user.token)
       setSession(newSession)
       setStatus('ready')
     } catch (err) {
@@ -101,7 +104,7 @@ export function UploadVideoPanel({ onClose }: { onClose: () => void }) {
   }
 
   function handleClear() {
-    if (session) void abortUploadSession(session)
+    if (session && user) void abortUploadSession(session, user.token)
     if (previewUrl) URL.revokeObjectURL(previewUrl)
     setFile(null)
     setPreviewUrl(null)
@@ -112,12 +115,12 @@ export function UploadVideoPanel({ onClose }: { onClose: () => void }) {
   }
 
   async function handleSubmit() {
-    if (!file || !session) return
+    if (!file || !session || !user) return
     setStatus('uploading')
     setError(null)
 
     try {
-      await finishUploadSession(session, file, {
+      await finishUploadSession(session, file, user.token, {
         onProgress: ({ uploadedBytes, totalBytes }) =>
           setProgress(Math.round((uploadedBytes / totalBytes) * 100)),
       })
