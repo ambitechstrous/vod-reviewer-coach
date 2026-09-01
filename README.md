@@ -155,14 +155,14 @@ echo '{"match_id":"abc123"}' | go run ./cmd/extractor
 
 ### 3. MinIO (S3 emulation)
 
-The backend talks to storage through the AWS S3 SDK, which MinIO also speaks, so pointing it at a local MinIO instance instead of real AWS is just the `AWS_ENDPOINT_URL` and `S3_FORCE_PATH_STYLE` env vars already shown above — no code changes needed. (`S3_FORCE_PATH_STYLE=true` matters: MinIO expects path-style requests — `host/bucket/key` — rather than the virtual-hosted-style, `bucket.host/key`, the AWS SDK defaults to.)
+The backend talks to storage through the AWS S3 SDK, which MinIO also speaks, so pointing it at a local MinIO instance instead of real AWS is just a matter of setting the `ENVIRONMENT` and `AWS_REGION` env vars to `DEVELOPMENT` and `us-east-1` respectively — no code changes needed. 
 
 Run MinIO via Docker:
 
 ```bash
 docker run -p 9000:9000 -p 9001:9001 \
   -e MINIO_ROOT_USER=minioadmin \
-  -e MINIO_ROOT_PASSWORD=<choose your password> \
+  -e MINIO_ROOT_PASSWORD=<choose-your-password> \
   minio/minio server /data --console-address ":9001"
 ```
 
@@ -172,7 +172,7 @@ docker run -p 9000:9000 -p 9001:9001 \
 Create the bucket the backend expects. The bucket name (`user-vods`) is hardcoded in `backend/internal/storage/s3.go`:
 
 ```bash
-mc alias set local http://localhost:9000 minioadmin minioadmin
+mc alias set local http://localhost:9000 minioadmin <choose-your-password>
 mc mb local/user-vods
 ```
 
