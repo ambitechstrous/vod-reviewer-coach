@@ -4,16 +4,24 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080
 // benefit over a single PUT is that parts can go out concurrently.
 const MAX_CONCURRENT_PARTS = 4
 
-interface UploadPart {
+interface UploadPartURL {
   part_number: number
   url: string
 }
 
-interface InitiateUploadResponse {
+interface CreateUploadSessionResponse {
   key: string
   upload_id: string
   part_size: number
-  parts: UploadPart[]
+  parts: UploadPartURL[]
+}
+
+/** An in-progress multipart upload. No file bytes have been sent yet. */
+export interface UploadSession {
+  videoName: string
+  uploadId: string
+  partSize: number
+  parts: UploadPartURL[]
 }
 
 export interface UploadProgress {
@@ -21,27 +29,56 @@ export interface UploadProgress {
   totalBytes: number
 }
 
-export interface UploadVideoOptions {
+/**
+ * Starts a multipart upload session and returns a presigned URL for every
+ * part. `videoName` becomes the video's S3 key, so it must be unique per
+ * upload. No file bytes are transferred by this call.
+ */
+export async function createUploadSession(
+  videoName: string,
+  file: File,
+  signal?: AbortSignal,
+): Promise<UploadSession> {
+  const res = await fetch(`${API_BASE_URL}/uploads`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      video_name: videoName,
+      content_type: file.type || 'application/octet-stream',
+      file_size: file.size,
+    }),
+    signal,
+  })
+
+  if (!res.ok) {
+    throw new Error(`failed to create upload session: ${res.status} ${await res.text()}`)
+  }
+
+  const data: CreateUploadSessionResponse = await res.json()
+  return {
+    videoName,
+    uploadId: data.upload_id,
+    partSize: data.part_size,
+    parts: data.parts,
+  }
+}
+
+export interface FinishUploadOptions {
   onProgress?: (progress: UploadProgress) => void
   signal?: AbortSignal
 }
 
 /**
- * Uploads a video file to S3 via the backend's multipart upload endpoints:
- * initiate (get one presigned URL per part) -> PUT each part directly to S3
- * -> complete. If anything fails partway through, the upload is aborted on
- * the backend so S3 doesn't keep billing for orphaned parts.
- *
- * `videoId` becomes the video's S3 key, so it must be unique per upload.
+ * Uploads every part of `file` directly to S3 using `session`'s presigned
+ * URLs, then completes the multipart upload. Aborts the session on the
+ * backend if any part fails or the upload is cancelled.
  */
-export async function uploadVideo(
-  videoId: string,
+export async function finishUploadSession(
+  session: UploadSession,
   file: File,
-  options: UploadVideoOptions = {},
+  options: FinishUploadOptions = {},
 ): Promise<void> {
   const { onProgress, signal } = options
-
-  const init = await initiateUpload(videoId, file, signal)
 
   let uploadedBytes = 0
   const reportProgress = (partBytes: number) => {
@@ -51,50 +88,40 @@ export async function uploadVideo(
 
   try {
     const completedParts = await runWithConcurrency(
-      init.parts,
+      session.parts,
       MAX_CONCURRENT_PARTS,
-      (part) => uploadPart(init, file, part, reportProgress, signal),
+      (part) => uploadPart(session, file, part, reportProgress, signal),
     )
 
-    await completeUpload(videoId, init.upload_id, completedParts, signal)
+    await completeUploadSession(session, completedParts, signal)
   } catch (err) {
-    await abortUpload(videoId, init.upload_id)
+    await abortUploadSession(session)
     throw err
   }
 }
 
-async function initiateUpload(
-  videoId: string,
-  file: File,
-  signal?: AbortSignal,
-): Promise<InitiateUploadResponse> {
-  const res = await fetch(`${API_BASE_URL}/uploads`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      video_id: videoId,
-      content_type: file.type || 'application/octet-stream',
-      file_size: file.size,
-    }),
-    signal,
-  })
-
-  if (!res.ok) {
-    throw new Error(`failed to initiate upload: ${res.status} ${await res.text()}`)
+/** Cancels an in-progress upload session, releasing any parts already uploaded to S3. */
+export async function abortUploadSession(session: UploadSession): Promise<void> {
+  try {
+    await fetch(`${API_BASE_URL}/uploads/abort`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ video_name: session.videoName, upload_id: session.uploadId }),
+    })
+  } catch {
+    // Best-effort cleanup — the caller has already moved on.
   }
-
-  return res.json()
 }
 
 async function uploadPart(
-  init: InitiateUploadResponse,
+  session: UploadSession,
   file: File,
-  part: UploadPart,
+  part: UploadPartURL,
   reportProgress: (bytes: number) => void,
   signal?: AbortSignal,
 ): Promise<{ part_number: number; etag: string }> {
-  const start = (part.part_number - 1) * init.part_size
-  const end = Math.min(start + init.part_size, file.size)
+  const start = (part.part_number - 1) * session.partSize
+  const end = Math.min(start + session.partSize, file.size)
   const chunk = file.slice(start, end)
 
   const res = await fetch(part.url, { method: 'PUT', body: chunk, signal })
@@ -114,9 +141,8 @@ async function uploadPart(
   return { part_number: part.part_number, etag }
 }
 
-async function completeUpload(
-  videoId: string,
-  uploadId: string,
+async function completeUploadSession(
+  session: UploadSession,
   parts: { part_number: number; etag: string }[],
   signal?: AbortSignal,
 ): Promise<void> {
@@ -124,8 +150,8 @@ async function completeUpload(
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      video_id: videoId,
-      upload_id: uploadId,
+      video_name: session.videoName,
+      upload_id: session.uploadId,
       parts: parts.sort((a, b) => a.part_number - b.part_number),
     }),
     signal,
@@ -133,18 +159,6 @@ async function completeUpload(
 
   if (!res.ok) {
     throw new Error(`failed to complete upload: ${res.status} ${await res.text()}`)
-  }
-}
-
-async function abortUpload(videoId: string, uploadId: string): Promise<void> {
-  try {
-    await fetch(`${API_BASE_URL}/uploads/abort`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ video_id: videoId, upload_id: uploadId }),
-    })
-  } catch {
-    // Best-effort cleanup — the original error is what the caller sees.
   }
 }
 

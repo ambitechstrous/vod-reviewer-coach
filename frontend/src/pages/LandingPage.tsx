@@ -1,8 +1,12 @@
+import { useState } from 'react'
 import { ChatPanel } from '../components/ChatPanel'
+import { UploadVideoPanel } from '../components/UploadVideoPanel'
 import { VideoTile } from '../components/VideoTile'
 import { mockVideos } from '../data/mockVideos'
 
 export function LandingPage() {
+  const [isUploadOpen, setIsUploadOpen] = useState(false)
+
   return (
     <div className="flex flex-col gap-10">
       <div>
@@ -16,6 +20,19 @@ export function LandingPage() {
           {mockVideos.map((video) => (
             <VideoTile key={video.id} video={video} />
           ))}
+        </div>
+
+        <div className="mt-4">
+          {isUploadOpen ? (
+            <UploadVideoPanel onClose={() => setIsUploadOpen(false)} />
+          ) : (
+            <button
+              onClick={() => setIsUploadOpen(true)}
+              className="w-full rounded-xl border border-dashed border-white/10 py-3 text-sm text-slate-400 transition hover:border-white/20 hover:text-white"
+            >
+              + Upload video
+            </button>
+          )}
         </div>
       </div>
 
