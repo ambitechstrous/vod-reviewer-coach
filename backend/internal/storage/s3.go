@@ -11,6 +11,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 )
@@ -34,16 +35,17 @@ func NewS3Client(ctx context.Context, bucket string) (*S3Client, error) {
 		return nil, fmt.Errorf("load aws config: %w", err)
 	}
 
-	// AWS_ENDPOINT_URL (read automatically by config.LoadDefaultConfig) points
-	// the SDK at a non-AWS endpoint like MinIO for local development. MinIO
-	// only understands path-style requests (host/bucket/key), not the
-	// virtual-hosted style (bucket.host/key) the SDK defaults to, so that
-	// must be opted into separately here.
-	usePathStyle := os.Getenv("S3_FORCE_PATH_STYLE") == "true"
-
 	return &S3Client{
 		client: s3.NewFromConfig(cfg, func(o *s3.Options) {
-			o.UsePathStyle = usePathStyle
+			// Override to local S3 instance for local development environments
+			env := os.Getenv("ENVIRONMENT")
+			if env == "development" || env == "test" {
+				o.UsePathStyle = true
+				o.BaseEndpoint = aws.String("http://localhost:9000")
+
+				user, password := os.Getenv("MINIO_USER"), os.Getenv("MINIO_PASSWORD")
+				o.Credentials = credentials.NewStaticCredentialsProvider(user, password, "")
+			}
 		}),
 		bucket: bucket,
 	}, nil
