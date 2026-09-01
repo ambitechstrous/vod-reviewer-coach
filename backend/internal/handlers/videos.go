@@ -22,10 +22,11 @@ type Video struct {
 	Summary       *string `json:"summary,omitempty"`
 }
 
-// mockVideos mirrors frontend/src/data/mockVideos.ts exactly, so the list
-// view renders identically whether it reads local mock data or this
-// endpoint. This is a placeholder for wiring up the frontend<->backend
-// connection before GetUserVideos scans S3 for a user's real videos.
+// mockVideos is a placeholder for the frontend<->backend connection before
+// GetUserVideos/GetVideoDetails scan S3 for a user's real videos. Every
+// entry has a VideoURL regardless of Status — the raw file lands in S3 as
+// soon as upload completes, independent of analysis, so it's always
+// playable; only Summary depends on analysis being done.
 var mockVideos = []Video{
 	{
 		ID:            "vod-1042",
@@ -57,6 +58,7 @@ var mockVideos = []Video{
 		UploadedAt:    "2026-09-01T02:15:00Z",
 		DurationLabel: "22:47",
 		ThumbnailHue:  25,
+		VideoURL:      new("https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4"),
 	},
 	{
 		ID:            "vod-1039",
@@ -66,6 +68,7 @@ var mockVideos = []Video{
 		UploadedAt:    "2026-09-01T01:02:00Z",
 		DurationLabel: "19:33",
 		ThumbnailHue:  340,
+		VideoURL:      new("https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4"),
 	},
 	{
 		ID:            "vod-1038",
@@ -75,6 +78,7 @@ var mockVideos = []Video{
 		UploadedAt:    "2026-09-01T03:40:00Z",
 		DurationLabel: "35:20",
 		ThumbnailHue:  145,
+		VideoURL:      new("https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4"),
 	},
 	{
 		ID:            "vod-1037",
@@ -84,6 +88,7 @@ var mockVideos = []Video{
 		UploadedAt:    "2026-09-01T03:52:00Z",
 		DurationLabel: "12:08",
 		ThumbnailHue:  55,
+		VideoURL:      new("https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4"),
 	},
 }
 

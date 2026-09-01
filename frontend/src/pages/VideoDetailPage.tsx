@@ -78,11 +78,7 @@ export function VideoDetailPage() {
               background: `linear-gradient(135deg, hsl(${video.thumbnailHue} 70% 16%), hsl(${video.thumbnailHue} 70% 8%))`,
             }}
           >
-            <p className="text-sm text-white/50">
-              {video.status === 'analyzing'
-                ? 'Video will be viewable once analysis finishes.'
-                : 'Video uploaded — waiting to start analysis.'}
-            </p>
+            <p className="text-sm text-white/50">Video preview unavailable.</p>
           </div>
         )}
       </div>
