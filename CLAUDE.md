@@ -30,6 +30,15 @@ go run ./cmd/analyzer
 PORT=9090 go run ./cmd/analyzer
 ```
 
+```bash
+# Frontend (run from frontend/)
+cd frontend
+npm install
+npm run dev      # Vite dev server, http://localhost:5173
+npm run build    # tsc -b && vite build
+npm run lint     # oxlint
+```
+
 ## Architecture
 
 The pipeline is `Upload → Sampler → Extractor → Analyzer → Feedback`. Three independent services share a single Go module (`github.com/ambitechstrous/vod-reviewer-coach`) and common packages under `internal/`.
@@ -51,3 +60,14 @@ The pipeline is `Upload → Sampler → Extractor → Analyzer → Feedback`. Th
 - **Sampler** receives `{"video_id": "..."}`, streams the video from S3, and is expected to write an audio track and sampled frames back to S3.
 - **Extractor** receives `{"match_id": "..."}`, reads the Sampler's outputs, and is expected to produce a timestamped transcript (speech-to-text via Gemini) and a game state stream (multimodal frame analysis via Gemini).
 - **Analyzer** receives the transcript + game state stream over HTTP `POST /analyze` and is expected to call an LLM to produce structured coaching feedback.
+
+### Frontend (`frontend/`)
+
+A separate npm project (not part of the Go module) — React 19 + TypeScript, Vite, Tailwind v4, React Router 7. Currently built against mock data (`frontend/src/data/mockVideos.ts`) since there's no video/user API to call yet.
+
+- `src/pages/` — `LandingPage` (video list + chat), `VideoDetailPage`, `LoginPage`.
+- `src/components/` — `VideoTile`, `VideoThumbnail`, `StatusBadge`, `ChatPanel`, `Layout`, `ProtectedRoute`.
+- `src/lib/auth.tsx` — mock `AuthProvider`/`useAuth` (any email logs in, session kept in `localStorage`); routes are gated via `ProtectedRoute`.
+- `src/types.ts` — shared `Video` (`status: 'uploaded' | 'analyzing' | 'processed'`) and `ChatMessage` types.
+
+When the real backend endpoints exist, mock data and the mock auth provider are the pieces to swap out first.

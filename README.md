@@ -56,6 +56,16 @@ The final stage. Takes the full picture of what happened in the match — what w
 
 ---
 
+### Frontend (`frontend/`)
+
+A React + TypeScript single-page app (Vite, Tailwind v4, React Router) that will sit in front of the pipeline. It is currently scaffolded against mock data while the backend's video/user schemas are still being built out.
+
+- **Landing page** — list of uploaded videos (thumbnail + status: `uploaded` / `analyzing` / `processed`) with a chat panel below for asking an AI coach about gameplay.
+- **Video detail page** — video player, title, status, and the coaching summary once analysis is `processed`.
+- **Login** — mock auth (any email logs in) gating the app, standing in for real user/video mapping.
+
+---
+
 ## Project Structure
 
 ```
@@ -66,6 +76,7 @@ cmd/
 internal/
   handlers/     # Handler interface, per-service business logic
   storage/      # S3 client (video streaming, presigned URLs, audio/image uploads)
+frontend/       # React + Vite + TypeScript SPA (mock data for now)
 ```
 
 ## Running Locally
@@ -85,4 +96,12 @@ The HTTP service:
 ```bash
 go run ./cmd/analyzer        # listens on :8080
 PORT=9090 go run ./cmd/analyzer
+```
+
+The frontend:
+
+```bash
+cd frontend
+npm install
+npm run dev           # http://localhost:5173
 ```
