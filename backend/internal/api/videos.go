@@ -9,12 +9,8 @@ import (
 
 	"github.com/ambitechstrous/vod-reviewer-coach/internal/auth"
 	"github.com/ambitechstrous/vod-reviewer-coach/internal/model"
+	"github.com/ambitechstrous/vod-reviewer-coach/internal/storage"
 	"github.com/go-chi/chi/v5"
-)
-
-const (
-	metadataFileName = "metadata.json"
-	videoFileName    = "video.mp4"
 )
 
 // GetUserVideos gets a list view of all videos for a given user
@@ -43,7 +39,7 @@ func (h *HttpHandler) GetUserVideos(w http.ResponseWriter, r *http.Request) {
 		videoID, fileName := parts[1], parts[2]
 
 		// Only pull metadata.json, video itself is not needed for the list view
-		if fileName == metadataFileName {
+		if fileName == storage.MetadataFileName {
 			data, err := h.s3Client.GetObject(ctx, obj.Key)
 			if err != nil {
 				http.Error(w, "failed to read video metadata: "+err.Error(), http.StatusInternalServerError)
@@ -86,7 +82,7 @@ func (h *HttpHandler) GetVideoDetails(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// TODO: Fetch more metadata like analysis results/summary.
-	metaKey := fmt.Sprintf("%s/%s/%s", userID, videoID, metadataFileName)
+	metaKey := fmt.Sprintf("%s/%s/%s", userID, videoID, storage.MetadataFileName)
 	data, err := h.s3Client.GetObject(ctx, metaKey)
 	if err != nil {
 		http.Error(w, "video not found", http.StatusNotFound)
@@ -109,7 +105,7 @@ func (h *HttpHandler) GetVideoDetails(w http.ResponseWriter, r *http.Request) {
 		ThumbnailHue:  55,
 	}
 
-	videoKey := fmt.Sprintf("%s/%s/%s", userID, videoID, videoFileName)
+	videoKey := fmt.Sprintf("%s/%s/%s", userID, videoID, storage.VideoFileName)
 	if url, err := h.s3Client.GetPresignedURL(ctx, videoKey, 5*time.Minute); err == nil {
 		response.VideoURL = &url
 	}

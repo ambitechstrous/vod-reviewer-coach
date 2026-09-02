@@ -19,6 +19,21 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 )
 
+type AnalyzerStatus string
+
+const (
+	AnalyzerStatusUploaded  AnalyzerStatus = "uploaded"
+	AnalyzerStatusAnalyzing AnalyzerStatus = "analyzing"
+	AnalyzerStatusAnalyzed  AnalyzerStatus = "analyzed"
+	AnalyzerStatusError     AnalyzerStatus = "error"
+)
+
+const (
+	AnalyzerFileName = "analysis.json"
+	MetadataFileName = "metadata.json"
+	VideoFileName    = "video.mp4"
+)
+
 type S3Client struct {
 	client   *s3.Client
 	psClient *s3.PresignClient
@@ -102,8 +117,8 @@ func (c *S3Client) ListObjects(ctx context.Context, prefix string) ([]ObjectInfo
 	return objects, nil
 }
 
-// GetObject fetches an object's full body. Meant for small objects like JSON
-// metadata — use GetVideo for streaming video bytes instead.
+// GetObject fetches an object's full body. Meant for small objects like JSON metadata
+// Use GetVideo for streaming video bytes instead.
 func (c *S3Client) GetObject(ctx context.Context, key string) ([]byte, error) {
 	out, err := c.client.GetObject(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(c.bucket),
@@ -121,14 +136,60 @@ func (c *S3Client) GetObject(ctx context.Context, key string) ([]byte, error) {
 	return data, nil
 }
 
-// PutJSON marshals v and writes it to key as application/json. Meant for
-// small sidecar objects like a video's metadata.json.
+// GetVideo streams a video object from S3 by its key.
+func (c *S3Client) GetVideo(ctx context.Context, key string) (*VideoFile, error) {
+	out, err := c.client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(c.bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("get s3 object %q: %w", key, err)
+	}
+
+	var contentType string
+	if out.ContentType != nil {
+		contentType = *out.ContentType
+	}
+
+	var contentLength int64
+	if out.ContentLength != nil {
+		contentLength = *out.ContentLength
+	}
+
+	return &VideoFile{
+		Body:          out.Body,
+		ContentType:   contentType,
+		ContentLength: contentLength,
+	}, nil
+}
+
+// PutJSON marshals v and writes it to key as application/json
 func (c *S3Client) PutJSON(ctx context.Context, key string, v any) error {
 	data, err := json.Marshal(v)
 	if err != nil {
 		return fmt.Errorf("marshal json for %q: %w", key, err)
 	}
 	return c.put(ctx, key, bytes.NewReader(data), "application/json")
+}
+
+// UpdateAnalyzerStatus updates the status field in the metadata JSON for a given video.
+func (c *S3Client) UpdateAnalyzerStatus(ctx context.Context, key string, newStatus AnalyzerStatus) error {
+	// Fetch the existing metadata JSON from S3
+	data, err := c.GetObject(ctx, key)
+	if err != nil {
+		return fmt.Errorf("get metadata for %q: %w", key, err)
+	}
+
+	// Unmarshal the JSON into a map to modify the status field
+	var meta map[string]any
+	if err := json.Unmarshal(data, &meta); err != nil {
+		return fmt.Errorf("unmarshal metadata for %q: %w", key, err)
+	}
+
+	// Update the status field
+	meta["status"] = newStatus
+
+	return c.PutJSON(ctx, key, meta)
 }
 
 // GetPresignedURL returns a time-limited URL that grants read access to a single video object. Keep ttl short (5–15 min) and never log the URL.
@@ -241,31 +302,4 @@ func (c *S3Client) put(ctx context.Context, key string, body io.Reader, contentT
 		return fmt.Errorf("put s3 object %q: %w", key, err)
 	}
 	return nil
-}
-
-// GetVideo streams a video object from S3 by its key.
-func (c *S3Client) GetVideo(ctx context.Context, key string) (*VideoFile, error) {
-	out, err := c.client.GetObject(ctx, &s3.GetObjectInput{
-		Bucket: aws.String(c.bucket),
-		Key:    aws.String(key),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("get s3 object %q: %w", key, err)
-	}
-
-	var contentType string
-	if out.ContentType != nil {
-		contentType = *out.ContentType
-	}
-
-	var contentLength int64
-	if out.ContentLength != nil {
-		contentLength = *out.ContentLength
-	}
-
-	return &VideoFile{
-		Body:          out.Body,
-		ContentType:   contentType,
-		ContentLength: contentLength,
-	}, nil
 }
