@@ -8,7 +8,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/ambitechstrous/vod-reviewer-coach/internal/handlers"
+	"github.com/ambitechstrous/vod-reviewer-coach/internal/api"
 	"github.com/joho/godotenv"
 )
 
@@ -19,7 +19,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	httpHandler, err := handlers.NewHttpHandler(context.Background())
+	httpHandler, err := api.NewHttpHandler(context.Background())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "analyzer: failed to create HTTP handler: %v\n", err)
 		os.Exit(1)

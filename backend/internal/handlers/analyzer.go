@@ -1,47 +1,68 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"mime"
-	"net/http"
 	"os"
 	"path/filepath"
+
+	"github.com/ambitechstrous/vod-reviewer-coach/internal/client"
+	"github.com/ambitechstrous/vod-reviewer-coach/internal/storage"
 )
 
-type AnalyzeRequest struct {
+type AnalyzerHandler struct {
+	geminiClient *client.GeminiClient
+	s3Client     *storage.S3Client
+}
+
+type AnalyzerEvent struct {
 	VideoKey string `json:"video_key"` // S3 path (prod)
 	FilePath string `json:"file_path"` // local path (testing)
 	Prompt   string `json:"prompt"`
 }
 
-func (h *HttpHandler) Analyze(w http.ResponseWriter, r *http.Request) {
-	var req AnalyzeRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
-		return
+func NewAnalyzerHandler(ctx context.Context) (*AnalyzerHandler, error) {
+	geminiClient, err := client.NewGeminiClient(ctx)
+	if err != nil {
+		return nil, err
 	}
 
-	log.Printf("Received analyze request: %+v\n", req)
-	reader, err := os.Open(req.FilePath)
+	s3Client, err := storage.NewS3Client(ctx, "user-vods")
 	if err != nil {
-		http.Error(w, "failed to open file: "+err.Error(), http.StatusInternalServerError)
-		return
+		return nil, err
+	}
+	return &AnalyzerHandler{
+		geminiClient: geminiClient,
+		s3Client:     s3Client,
+	}, nil
+}
+
+func (h *AnalyzerHandler) Run(ctx context.Context, event Event) error {
+	var analyzerEvent AnalyzerEvent
+	if err := json.Unmarshal(event.Payload, &analyzerEvent); err != nil {
+		return err
+	}
+
+	log.Printf("Received analyze request: %+v\n", analyzerEvent)
+	reader, err := os.Open(analyzerEvent.FilePath)
+	if err != nil {
+		return err
 	}
 	defer reader.Close()
 
-	mimeType := mime.TypeByExtension(filepath.Ext(req.FilePath))
+	mimeType := mime.TypeByExtension(filepath.Ext(analyzerEvent.FilePath))
 	if mimeType == "" {
-		http.Error(w, "could not determine MIME type", http.StatusBadRequest)
-		return
+		return fmt.Errorf("could not determine MIME type")
 	}
 
-	resp, err := h.geminiClient.AnalyzeVideo(r.Context(), reader, mimeType, req.Prompt)
+	resp, err := h.geminiClient.AnalyzeVideo(ctx, reader, mimeType, analyzerEvent.Prompt)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		return err
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"response": resp})
+	log.Printf("Analysis result: %s\n", resp)
+	return nil
 }

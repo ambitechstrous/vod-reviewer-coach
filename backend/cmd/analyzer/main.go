@@ -9,6 +9,6 @@ import (
 // TODO: Migrate analyzer to a Lambda handler and point this to that
 func main() {
 	handlers.RunHandler(func(ctx context.Context) (handlers.Handler, error) {
-		return handlers.NewExtractorHandler(ctx)
+		return handlers.NewAnalyzerHandler(ctx)
 	})
 }
