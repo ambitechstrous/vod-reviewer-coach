@@ -11,6 +11,11 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
+const (
+	metadataFileName = "metadata.json"
+	videoFileName    = "video.mp4"
+)
+
 // Video mirrors the frontend's Video type (frontend/src/types.ts) field for
 // field, so the frontend can decode this response directly as a Video[]
 // with no transformation.
@@ -26,33 +31,67 @@ type Video struct {
 	Summary       *string `json:"summary,omitempty"`
 }
 
+// VideoMetadata is the shape stored in each video's metadata.json sidecar
+// object (userID/videoID/metadata.json).
+type VideoMetadata struct {
+	Title      string `json:"title"`
+	Game       string `json:"game"`
+	Status     string `json:"status"`
+	UploadedAt string `json:"uploadedAt"`
+}
+
 // GetUserVideos gets a list view of all videos for a given user
 func (h *HttpHandler) GetUserVideos(w http.ResponseWriter, r *http.Request) {
-	userID, ok := auth.UserIDFromContext(r.Context())
+	ctx := r.Context()
+	userID, ok := auth.UserIDFromContext(ctx)
 	if !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
-	videos, err := h.s3Client.ListVideos(r.Context(), userID)
+	objects, err := h.s3Client.ListObjects(ctx, userID)
 	if err != nil {
 		http.Error(w, "failed to list videos: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	response := make([]Video, 0, len(videos))
-	for _, v := range videos {
-		name := strings.Split(v.Key, "/")[1]
-		response = append(response, Video{
-			ID:            name,
-			Title:         name,            // Placeholder; in a real app, you'd extract a title from metadata or a database
-			Game:          "Rocket League", // Placeholder; in a real app, you'd extract the game from metadata or a database
-			Status:        "uploaded",      // Placeholder; in a real app, you'd determine status based on analysis results
-			UploadedAt:    v.LastModified,
-			DurationLabel: "12:00", // Placeholder; in a real app, you'd extract duration from metadata or a database
-			ThumbnailHue:  55,      // Placeholder; in a real app, you'd extract thumbnail hue from metadata or a database
-			VideoURL:      &v.URL,  // FIXME: Don't need a video URL here, only the thumbnail
-		})
+	// Group object keys by video ID (the path segment right after userID/) so we pull only metadata.json
+	response := make([]Video, 0, len(objects))
+	for _, obj := range objects {
+		parts := strings.Split(obj.Key, "/")
+		if len(parts) != 3 { // userID/videoID/filename
+			continue
+		}
+
+		videoID, fileName := parts[1], parts[2]
+
+		// Only pull metadata.json, video itself is not needed for the list view
+		if fileName == metadataFileName {
+			data, err := h.s3Client.GetObject(ctx, obj.Key)
+			if err != nil {
+				http.Error(w, "failed to read video metadata: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+
+			var meta VideoMetadata
+			if err := json.Unmarshal(data, &meta); err != nil {
+				http.Error(w, "corrupt video metadata: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+
+			video := Video{
+				ID:         videoID,
+				Title:      meta.Title,
+				Game:       meta.Game,
+				Status:     meta.Status,
+				UploadedAt: meta.UploadedAt,
+				// Placeholder values; not tracked yet.
+				DurationLabel: "12:00",
+				ThumbnailHue:  55,
+			}
+
+			response = append(response, video)
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -61,32 +100,41 @@ func (h *HttpHandler) GetUserVideos(w http.ResponseWriter, r *http.Request) {
 
 // GetVideoDetails gets the details of a specific video for a given user, including the summary and analysis results.
 func (h *HttpHandler) GetVideoDetails(w http.ResponseWriter, r *http.Request) {
-	videoName := chi.URLParam(r, "videoName")
-	userID, ok := auth.UserIDFromContext(r.Context())
+	videoID := chi.URLParam(r, "videoID")
+	ctx := r.Context()
+	userID, ok := auth.UserIDFromContext(ctx)
 	if !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
-	// TODO: Fetch more metadata like video game and analysis results.
-	prefix := fmt.Sprintf("%s/%s", userID, videoName)
-	url, err := h.s3Client.GetPresignedURL(r.Context(), prefix, 5*time.Minute)
+	// TODO: Fetch more metadata like analysis results/summary.
+	metaKey := fmt.Sprintf("%s/%s/%s", userID, videoID, metadataFileName)
+	data, err := h.s3Client.GetObject(ctx, metaKey)
 	if err != nil {
-		fmt.Printf("failed to get presigned URL for video %s: %v\n", prefix, err)
 		http.Error(w, "video not found", http.StatusNotFound)
 		return
 	}
 
+	var meta VideoMetadata
+	if err := json.Unmarshal(data, &meta); err != nil {
+		http.Error(w, "corrupt video metadata: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
 	response := Video{
-		ID:       videoName,
-		VideoURL: &url,
-		// Placeholder values; in a real app, you'd fetch these from metadata or a database
-		Title:         videoName,
-		Game:          "Rocket League",
-		Status:        "uploaded",
-		UploadedAt:    "2026-09-01T03:52:00Z",
+		ID:            videoID,
+		Title:         meta.Title,
+		Game:          meta.Game,
+		Status:        meta.Status,
+		UploadedAt:    meta.UploadedAt,
 		DurationLabel: "12:00",
 		ThumbnailHue:  55,
+	}
+
+	videoKey := fmt.Sprintf("%s/%s/%s", userID, videoID, videoFileName)
+	if url, err := h.s3Client.GetPresignedURL(ctx, videoKey, 5*time.Minute); err == nil {
+		response.VideoURL = &url
 	}
 
 	w.Header().Set("Content-Type", "application/json")

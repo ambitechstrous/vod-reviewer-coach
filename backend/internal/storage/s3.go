@@ -7,6 +7,7 @@ import (
 	"mime"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -30,11 +31,18 @@ type VideoFile struct {
 	ContentLength int64
 }
 
-// VideoInfo holds relevant metadata and a presigned URL to fetch the video object.
-type VideoInfo struct {
-	Key          string `json:"key"`
-	LastModified string `json:"last_modified"`
-	URL          string `json:"url"`
+// ObjectInfo is a lightweight listing entry — just the key and last-modified
+// time S3 reports. It carries no domain meaning; callers decide what a key
+// represents.
+type ObjectInfo struct {
+	Key          string
+	LastModified time.Time
+}
+
+// CompletedPart identifies one successfully uploaded part of a multipart upload, as reported back by the client after each part PUT.
+type CompletedPart struct {
+	PartNumber int32
+	ETag       string
 }
 
 func NewS3Client(ctx context.Context, bucket string) (*S3Client, error) {
@@ -61,10 +69,14 @@ func NewS3Client(ctx context.Context, bucket string) (*S3Client, error) {
 	}, nil
 }
 
-// ListVideos lists all video objects in the S3 bucket for a given user, identified by userID. It returns a slice of VideoFile metadata.
-func (c *S3Client) ListVideos(ctx context.Context, userID string) ([]VideoInfo, error) {
-	prefix := fmt.Sprintf("%s/", userID)
-	var videos []VideoInfo
+// ListObjects lists every object under prefix (S3 has no real directories,
+// so this recurses implicitly through anything sharing the prefix).
+func (c *S3Client) ListObjects(ctx context.Context, prefix string) ([]ObjectInfo, error) {
+	if !strings.HasSuffix(prefix, "/") {
+		prefix = fmt.Sprintf("%s/", prefix)
+	}
+
+	var objects []ObjectInfo
 
 	paginator := s3.NewListObjectsV2Paginator(c.client, &s3.ListObjectsV2Input{
 		Bucket: aws.String(c.bucket),
@@ -78,21 +90,33 @@ func (c *S3Client) ListVideos(ctx context.Context, userID string) ([]VideoInfo, 
 		}
 
 		for _, obj := range page.Contents {
-			key := aws.ToString(obj.Key)
-			url, err := c.GetPresignedURL(ctx, key, 5*time.Minute)
-			if err != nil {
-				return nil, fmt.Errorf("presign get video: %w", err)
-			}
-
-			videos = append(videos, VideoInfo{
-				Key:          key,
-				LastModified: obj.LastModified.Format(time.RFC3339),
-				URL:          url,
+			objects = append(objects, ObjectInfo{
+				Key:          aws.ToString(obj.Key),
+				LastModified: aws.ToTime(obj.LastModified),
 			})
 		}
 	}
 
-	return videos, nil
+	return objects, nil
+}
+
+// GetObject fetches an object's full body. Meant for small objects like JSON
+// metadata — use GetVideo for streaming video bytes instead.
+func (c *S3Client) GetObject(ctx context.Context, key string) ([]byte, error) {
+	out, err := c.client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(c.bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("get s3 object %q: %w", key, err)
+	}
+	defer out.Body.Close()
+
+	data, err := io.ReadAll(out.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read s3 object %q: %w", key, err)
+	}
+	return data, nil
 }
 
 // GetPresignedURL returns a time-limited URL that grants read access to a single video object. Keep ttl short (5–15 min) and never log the URL.
@@ -107,15 +131,7 @@ func (c *S3Client) GetPresignedURL(ctx context.Context, key string, ttl time.Dur
 	return req.URL, nil
 }
 
-// CompletedPart identifies one successfully uploaded part of a multipart
-// upload, as reported back by the client after each part PUT.
-type CompletedPart struct {
-	PartNumber int32
-	ETag       string
-}
-
-// CreateMultipartUpload starts a multipart upload for key and returns the
-// upload ID clients need to presign and complete/abort it.
+// CreateMultipartUpload starts a multipart upload for key and returns the upload ID clients need to presign and complete/abort it.
 func (c *S3Client) CreateMultipartUpload(ctx context.Context, key, contentType string) (string, error) {
 	out, err := c.client.CreateMultipartUpload(ctx, &s3.CreateMultipartUploadInput{
 		Bucket:      aws.String(c.bucket),
@@ -128,8 +144,7 @@ func (c *S3Client) CreateMultipartUpload(ctx context.Context, key, contentType s
 	return aws.ToString(out.UploadId), nil
 }
 
-// PresignUploadPart returns a time-limited URL the client can PUT a single
-// part's bytes to directly.
+// PresignUploadPart returns a time-limited URL the client can PUT a single part's bytes to directly.
 func (c *S3Client) PresignUploadPart(ctx context.Context, key, uploadID string, partNumber int32, ttl time.Duration) (string, error) {
 	pc := s3.NewPresignClient(c.client)
 	req, err := pc.PresignUploadPart(ctx, &s3.UploadPartInput{
@@ -144,8 +159,7 @@ func (c *S3Client) PresignUploadPart(ctx context.Context, key, uploadID string, 
 	return req.URL, nil
 }
 
-// CompleteMultipartUpload finalizes a multipart upload once every part has
-// been uploaded. parts must be sorted by PartNumber.
+// CompleteMultipartUpload finalizes a multipart upload once every part has been uploaded. parts must be sorted by PartNumber.
 func (c *S3Client) CompleteMultipartUpload(ctx context.Context, key, uploadID string, parts []CompletedPart) error {
 	completed := make([]types.CompletedPart, len(parts))
 	for i, p := range parts {

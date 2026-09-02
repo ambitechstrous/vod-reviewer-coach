@@ -77,7 +77,7 @@ func (h *HttpHandler) SetUpRouter() *http.Server {
 		r.Post("/uploads/complete", h.CompleteUpload)
 		r.Post("/uploads/abort", h.AbortUpload)
 		r.Get("/videos", h.GetUserVideos)
-		r.Get("/videos/{videoName}", h.GetVideoDetails)
+		r.Get("/videos/{videoID}", h.GetVideoDetails)
 	})
 
 	port := os.Getenv("PORT")
