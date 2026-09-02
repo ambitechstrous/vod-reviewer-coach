@@ -24,7 +24,7 @@ type AnalyzerStatus string
 const (
 	AnalyzerStatusUploaded  AnalyzerStatus = "uploaded"
 	AnalyzerStatusAnalyzing AnalyzerStatus = "analyzing"
-	AnalyzerStatusAnalyzed  AnalyzerStatus = "analyzed"
+	AnalyzerStatusProcessed AnalyzerStatus = "processed"
 	AnalyzerStatusError     AnalyzerStatus = "error"
 )
 

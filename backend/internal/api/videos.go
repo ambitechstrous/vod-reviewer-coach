@@ -113,7 +113,7 @@ func (h *HttpHandler) GetVideoDetails(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get the analysis summary if available (i.e. video has been analyzed already)
-	if response.Status == string(storage.AnalyzerStatusAnalyzed) {
+	if response.Status == string(storage.AnalyzerStatusProcessed) {
 		analysisKey := fmt.Sprintf("%s/%s/%s", userID, videoID, storage.AnalyzerFileName)
 		analysisData, err := h.s3Client.GetObject(ctx, analysisKey)
 

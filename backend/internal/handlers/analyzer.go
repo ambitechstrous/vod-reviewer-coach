@@ -78,8 +78,8 @@ func (h *AnalyzerHandler) Run(ctx context.Context, event Event) error {
 		return fmt.Errorf("failed to upload analysis result: %w", err)
 	}
 
-	// Update the status in metadata.json to "analyzed" after successful analysis and upload.
-	if err := h.s3Client.UpdateAnalyzerStatus(ctx, fmt.Sprintf("%s/%s", keyPrefix, storage.MetadataFileName), storage.AnalyzerStatusAnalyzed); err != nil {
+	// Update the status in metadata.json to "processed" after successful analysis and upload.
+	if err := h.s3Client.UpdateAnalyzerStatus(ctx, fmt.Sprintf("%s/%s", keyPrefix, storage.MetadataFileName), storage.AnalyzerStatusProcessed); err != nil {
 		return fmt.Errorf("failed to update status: %w", err)
 	}
 
