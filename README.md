@@ -21,9 +21,8 @@ Upload → Sampler → Extractor → Analyzer → Feedback
 The backend API the frontend talks to directly. Not itself a pipeline stage — it's the entry/exit point around it:
 
 - **Auth** — `POST /auth/login` issues a session token; `GET /auth/verify` confirms one is still valid
-- **Uploads** — `POST /uploads`, `/uploads/complete`, `/uploads/abort` drive the multipart upload flow (presigned S3 part URLs)
-- **Videos** — `GET /videos` and `GET /videos/{videoName}` list and fetch a user's videos from S3
-- **Analyze** — `POST /analyze` currently runs the LLM analysis synchronously over HTTP as a stand-in for the SQS-triggered `analyzer` Lambda described below (see `TODO.md`)
+- **Uploads** — `POST /uploads`, `/uploads/complete`, `/uploads/abort` drive the multipart upload flow (presigned S3 part URLs); completing an upload writes a `metadata.json` sidecar alongside the video
+- **Videos** — `GET /videos` and `GET /videos/{videoID}` list and fetch a user's videos from S3, reading each video's `metadata.json`
 
 ---
 
@@ -55,19 +54,19 @@ Takes the Sampler's output and extracts structured, timestamped information from
 
 ### Analyzer (`cmd/analyzer`)
 
-**Input:** the transcript and game state stream from the Extractor
+**Input:** `{"video_key" | "file_path", "prompt"}` — an S3 key (prod) or local path (testing), plus the prompt to analyze the video against
 
 **Runtime:** event-driven — Lambda or standalone binary (like `sampler`/`extractor`)
 
-The final stage. Takes the full picture of what happened in the match — what was said, where everyone was, and how the game unfolded — and feeds it into an LLM to produce structured coaching feedback:
+The final stage. Takes a video and a prompt, and feeds it into Gemini to produce coaching feedback:
 
-- Evaluates decision-making, positioning, and communication patterns
-- Identifies recurring habits (positive and negative) across the match
-- Produces concrete, actionable suggestions for improvement
+- Uploads the video to Gemini's File API and polls until it's processed
+- Generates a response from the given prompt (decision-making, positioning, communication patterns, etc. — the prompt itself isn't fixed yet)
+- Currently just logs the resulting text; turning that into a structured report delivered back to the player, and eventually reading directly from the transcript + game state stream instead of a raw video, is tracked in `TODO.md`
 
-**Output:** a coaching report delivered back to the player.
+**Output:** coaching feedback (currently logged, not yet persisted or delivered).
 
-**Status:** not implemented yet — `cmd/analyzer/main.go` is currently a placeholder stub. Getting it running as a real SQS-triggered Lambda (plus a local poller to test that flow) is tracked in `TODO.md`. Until then, `server`'s `POST /analyze` provides the same analysis synchronously over HTTP.
+**Status:** the Lambda/standalone handler itself is implemented (`AnalyzerHandler` calls Gemini directly). Still open: wiring a real SQS trigger on upload, a local poller to test that flow end to end, and consuming the Extractor's transcript/game-state output instead of a raw video — see `TODO.md`.
 
 ---
 
@@ -77,22 +76,26 @@ A React + TypeScript single-page app (Vite, Tailwind v4, React Router) that sits
 
 - **Landing page** — list of uploaded videos (thumbnail + status: `uploaded` / `analyzing` / `processed`) with a chat panel below for asking an AI coach about gameplay.
 - **Video detail page** — video player, title, status, and the coaching summary once analysis is `processed`.
-- **Login** — mock auth (any email logs in) gating the app, standing in for real user/video mapping.
+- **Login** — real JWT session issued by `server` (any email logs in — there's no password check yet), gating the app and scoping S3 keys to that user.
 
 ---
 
 ## Project Structure
 
 ```
-cmd/
-  server/       # HTTP service — chi router. Primary backend server for application.
-  analyzer/     # Event-driven — Lambda or standalone binary. Runs core analysis logic.
-  extractor/    # Event-driven — Lambda or standalone binary
-  sampler/      # Event-driven — Lambda or standalone binary
-internal/
-  handlers/     # Handler interface, per-service business logic
-  storage/      # S3 client (video streaming, presigned URLs, audio/image uploads)
-frontend/       # React + Vite + TypeScript SPA
+backend/
+  cmd/
+    server/       # HTTP service — chi router. Primary backend server for application.
+    analyzer/     # Event-driven — Lambda or standalone binary. Runs core analysis logic.
+    extractor/    # Event-driven — Lambda or standalone binary
+    sampler/      # Event-driven — Lambda or standalone binary
+  internal/
+    api/          # server's HTTP handlers: auth, uploads, video list/detail, middleware
+    auth/         # JWT session token issuing/verification
+    client/       # GeminiClient — Gemini File API video analysis
+    handlers/     # Handler interface + RunHandler dispatcher, pipeline handlers (sampler/extractor/analyzer)
+    storage/      # S3 client (video streaming, presigned URLs, multipart uploads, audio/image uploads)
+frontend/         # React + Vite + TypeScript SPA
 ```
 
 ## Local Setup
@@ -118,7 +121,7 @@ VITE_API_BASE_URL=http://localhost:8080
 Requires Go 1.26+. Config comes from environment variables — create `backend/.env` (already gitignored):
 
 ```
-# Gemini — required by the /analyze endpoint (served by cmd/server)
+# Gemini — required by cmd/analyzer
 GEMINI_API_KEY=your-gemini-api-key
 
 # S3 / MinIO — see the MinIO section below
@@ -144,14 +147,15 @@ go run ./cmd/server        # listens on :8080
 PORT=9090 go run ./cmd/server   # or a different port
 ```
 
-`sampler`, `extractor`, and `analyzer` aren't wired into the frontend yet. `sampler` and `extractor` can be run standalone, reading a JSON payload from stdin:
+`sampler`, `extractor`, and `analyzer` aren't wired into the frontend yet. All three can be run standalone, reading a JSON payload from stdin:
 
 ```bash
 echo '{"video_id":"abc123"}' | go run ./cmd/sampler
 echo '{"match_id":"abc123"}' | go run ./cmd/extractor
+echo '{"file_path":"/path/to/video.mp4","prompt":"..."}' | go run ./cmd/analyzer   # requires GEMINI_API_KEY
 ```
 
-`analyzer` is currently a placeholder stub (see `TODO.md`) — it isn't wired to real Lambda logic yet, so there's no meaningful payload to run it with.
+`sampler` and `extractor` are still placeholder stubs (see `TODO.md`). `analyzer` actually calls Gemini to analyze the given video, but nothing upstream triggers it yet — no SQS wiring, and it isn't reading the Extractor's transcript/game-state output.
 
 ### 3. MinIO (S3 emulation)
 

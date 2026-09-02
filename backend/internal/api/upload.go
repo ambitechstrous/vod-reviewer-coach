@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/ambitechstrous/vod-reviewer-coach/internal/auth"
+	"github.com/ambitechstrous/vod-reviewer-coach/internal/model"
 	"github.com/ambitechstrous/vod-reviewer-coach/internal/storage"
 )
 
@@ -187,7 +188,7 @@ func (h *HttpHandler) CompleteUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	metadata := VideoMetadata{
+	metadata := model.VideoMetadata{
 		Title:      req.VideoName,
 		Game:       "Rocket League",
 		Status:     "uploaded",

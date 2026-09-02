@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/ambitechstrous/vod-reviewer-coach/internal/auth"
+	"github.com/ambitechstrous/vod-reviewer-coach/internal/model"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -15,30 +16,6 @@ const (
 	metadataFileName = "metadata.json"
 	videoFileName    = "video.mp4"
 )
-
-// Video mirrors the frontend's Video type (frontend/src/types.ts) field for
-// field, so the frontend can decode this response directly as a Video[]
-// with no transformation.
-type Video struct {
-	ID            string  `json:"id"`
-	Title         string  `json:"title"`
-	Game          string  `json:"game"`
-	Status        string  `json:"status"`
-	UploadedAt    string  `json:"uploadedAt"`
-	DurationLabel string  `json:"durationLabel"`
-	ThumbnailHue  int     `json:"thumbnailHue"`
-	VideoURL      *string `json:"videoUrl,omitempty"`
-	Summary       *string `json:"summary,omitempty"`
-}
-
-// VideoMetadata is the shape stored in each video's metadata.json sidecar
-// object (userID/videoID/metadata.json).
-type VideoMetadata struct {
-	Title      string `json:"title"`
-	Game       string `json:"game"`
-	Status     string `json:"status"`
-	UploadedAt string `json:"uploadedAt"`
-}
 
 // GetUserVideos gets a list view of all videos for a given user
 func (h *HttpHandler) GetUserVideos(w http.ResponseWriter, r *http.Request) {
@@ -56,7 +33,7 @@ func (h *HttpHandler) GetUserVideos(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Group object keys by video ID (the path segment right after userID/) so we pull only metadata.json
-	response := make([]Video, 0, len(objects))
+	response := make([]model.Video, 0, len(objects))
 	for _, obj := range objects {
 		parts := strings.Split(obj.Key, "/")
 		if len(parts) != 3 { // userID/videoID/filename
@@ -73,13 +50,13 @@ func (h *HttpHandler) GetUserVideos(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 
-			var meta VideoMetadata
+			var meta model.VideoMetadata
 			if err := json.Unmarshal(data, &meta); err != nil {
 				http.Error(w, "corrupt video metadata: "+err.Error(), http.StatusInternalServerError)
 				return
 			}
 
-			video := Video{
+			video := model.Video{
 				ID:         videoID,
 				Title:      meta.Title,
 				Game:       meta.Game,
@@ -116,13 +93,13 @@ func (h *HttpHandler) GetVideoDetails(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var meta VideoMetadata
+	var meta model.VideoMetadata
 	if err := json.Unmarshal(data, &meta); err != nil {
 		http.Error(w, "corrupt video metadata: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	response := Video{
+	response := model.Video{
 		ID:            videoID,
 		Title:         meta.Title,
 		Game:          meta.Game,
