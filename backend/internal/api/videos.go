@@ -28,7 +28,7 @@ func (h *HttpHandler) GetUserVideos(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Group object keys by video ID (the path segment right after userID/) so we pull only metadata.json
+	// Get metadata for each video and build a response list. Each video is stored in S3 under a prefix of userID/videoID/, and the metadata is stored in a file named metadata.json.
 	response := make([]model.Video, 0, len(objects))
 	for _, obj := range objects {
 		parts := strings.Split(obj.Key, "/")
