@@ -7,6 +7,7 @@ import (
 	"log"
 
 	"github.com/ambitechstrous/vod-reviewer-coach/internal/client"
+	"github.com/ambitechstrous/vod-reviewer-coach/internal/model"
 	"github.com/ambitechstrous/vod-reviewer-coach/internal/storage"
 )
 
@@ -67,8 +68,12 @@ func (h *AnalyzerHandler) Run(ctx context.Context, event Event) error {
 		return err
 	}
 
+	analysisResult := model.AnalysisResult{
+		Summary: resp,
+	}
+
 	// Upload the analysis result to S3 as a JSON file under the same userID/videoID prefix.
-	if err = h.s3Client.PutJSON(ctx, fmt.Sprintf("%s/%s", keyPrefix, storage.AnalyzerFileName), resp); err != nil {
+	if err = h.s3Client.PutJSON(ctx, fmt.Sprintf("%s/%s", keyPrefix, storage.AnalyzerFileName), analysisResult); err != nil {
 		return fmt.Errorf("failed to upload analysis result: %w", err)
 	}
 

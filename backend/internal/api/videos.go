@@ -89,6 +89,7 @@ func (h *HttpHandler) GetVideoDetails(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Get metadata about video such as title, game, status, and uploadedAt
 	var meta model.VideoMetadata
 	if err := json.Unmarshal(data, &meta); err != nil {
 		http.Error(w, "corrupt video metadata: "+err.Error(), http.StatusInternalServerError)
@@ -105,9 +106,22 @@ func (h *HttpHandler) GetVideoDetails(w http.ResponseWriter, r *http.Request) {
 		ThumbnailHue:  55,
 	}
 
+	// Get a presigned URL for the video file to enable playback without exposing the S3 bucket directly
 	videoKey := fmt.Sprintf("%s/%s/%s", userID, videoID, storage.VideoFileName)
 	if url, err := h.s3Client.GetPresignedURL(ctx, videoKey, 5*time.Minute); err == nil {
 		response.VideoURL = &url
+	}
+
+	// Retrieve analysis if available
+	analysisBytes, err := h.s3Client.GetObject(ctx, fmt.Sprintf("%s/%s/%s", userID, videoID, storage.AnalyzerFileName))
+	if err == nil {
+		var analysisResult model.AnalysisResult
+		if err := json.Unmarshal(analysisBytes, &analysisResult); err == nil {
+			response.Summary = &analysisResult.Summary
+		}
+	} else if !strings.Contains(err.Error(), "not found") {
+		http.Error(w, "failed to read analysis result: "+err.Error(), http.StatusInternalServerError)
+		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
