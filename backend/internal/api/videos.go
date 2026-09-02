@@ -112,20 +112,23 @@ func (h *HttpHandler) GetVideoDetails(w http.ResponseWriter, r *http.Request) {
 		response.VideoURL = &url
 	}
 
-	// Retrieve analysis if available
-	analysisBytes, err := h.s3Client.GetObject(ctx, fmt.Sprintf("%s/%s/%s", userID, videoID, storage.AnalyzerFileName))
+	// Get the analysis summary if available (i.e. video has been analyzed already)
+	if response.Status == string(storage.AnalyzerStatusAnalyzed) {
+		analysisKey := fmt.Sprintf("%s/%s/%s", userID, videoID, storage.AnalyzerFileName)
+		analysisData, err := h.s3Client.GetObject(ctx, analysisKey)
 
-	// FIXME: error branching feels weird here
-	if err == nil {
-		var analysisResult model.AnalysisResult
-		if err := json.Unmarshal(analysisBytes, &analysisResult); err == nil {
-			response.Summary = &analysisResult.Summary
-		} else {
-			fmt.Printf("failed to unmarshall analysis result: %v", err)
+		// If the analysis result is not found, but the status is analyzed, this is a legitimate error, either with S3 or the data in it.
+		if err != nil {
+			http.Error(w, "failed to read analysis result: "+err.Error(), http.StatusInternalServerError)
 		}
-	} else if !strings.Contains(err.Error(), "not found") {
-		http.Error(w, "failed to read analysis result: "+err.Error(), http.StatusInternalServerError)
-		return
+
+		// Unmarshall analysis result and pull the summary into the response object
+		var analysisResult model.AnalysisResult
+		if err := json.Unmarshal(analysisData, &analysisResult); err != nil {
+			http.Error(w, "failed to unmarshal analysis result: "+err.Error(), http.StatusInternalServerError)
+		}
+
+		response.Summary = &analysisResult.Summary
 	}
 
 	w.Header().Set("Content-Type", "application/json")
