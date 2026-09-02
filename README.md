@@ -22,7 +22,7 @@ The backend API the frontend talks to directly. Not itself a pipeline stage — 
 
 - **Auth** — `POST /auth/login` issues a session token; `GET /auth/verify` confirms one is still valid
 - **Uploads** — `POST /uploads`, `/uploads/complete`, `/uploads/abort` drive the multipart upload flow (presigned S3 part URLs); completing an upload writes a `metadata.json` sidecar alongside the video
-- **Videos** — `GET /videos` and `GET /videos/{videoID}` list and fetch a user's videos from S3, reading each video's `metadata.json`
+- **Videos** — `GET /videos` and `GET /videos/{videoID}` list and fetch a user's videos from S3, reading each video's `metadata.json` — `GET /videos/{videoID}` also reads back `analysis.json` (once the Analyzer has written one) and returns it as `summary`
 
 ---
 
@@ -54,19 +54,20 @@ Takes the Sampler's output and extracts structured, timestamped information from
 
 ### Analyzer (`cmd/analyzer`)
 
-**Input:** `{"video_key" | "file_path", "prompt"}` — an S3 key (prod) or local path (testing), plus the prompt to analyze the video against
+**Input:** `{"user_id", "video_key", "prompt"}` — `video_key` is the video's ID, not a full S3 key; it's combined with `user_id` as the `{user_id}/{video_key}/...` prefix used for every object belonging to that video
 
 **Runtime:** event-driven — Lambda or standalone binary (like `sampler`/`extractor`)
 
 The final stage. Takes a video and a prompt, and feeds it into Gemini to produce coaching feedback:
 
-- Uploads the video to Gemini's File API and polls until it's processed
-- Generates a response from the given prompt (decision-making, positioning, communication patterns, etc. — the prompt itself isn't fixed yet)
-- Currently just logs the resulting text; turning that into a structured report delivered back to the player, and eventually reading directly from the transcript + game state stream instead of a raw video, is tracked in `TODO.md`
+- Marks the video `analyzing` in its `metadata.json`
+- Streams the video straight from S3 (`{user_id}/{video_key}/video.mp4`) into Gemini's File API and polls until it's processed
+- Generates a response from the given prompt (decision-making, positioning, communication patterns, etc. — the prompt itself isn't fixed yet); in local development (`ENVIRONMENT=development`) this step is skipped in favor of a canned placeholder response, to avoid burning real Gemini calls
+- Writes the result to `{user_id}/{video_key}/analysis.json` (currently just `{"summary": "..."}`) and marks the video `analyzed`. Nothing yet sets the video's status to `error` on failure (that status value exists but isn't used anywhere yet) — a failed run just leaves the video stuck at `analyzing`.
 
-**Output:** coaching feedback (currently logged, not yet persisted or delivered).
+**Output:** an `analysis.json` sidecar next to the video, which `server`'s `GET /videos/{videoID}` reads back and returns as `summary` — so once the Analyzer has run, its result shows up on the video detail page.
 
-**Status:** the Lambda/standalone handler itself is implemented (`AnalyzerHandler` calls Gemini directly). Still open: wiring a real SQS trigger on upload, a local poller to test that flow end to end, and consuming the Extractor's transcript/game-state output instead of a raw video — see `TODO.md`.
+**Status:** the Lambda/standalone handler and its S3 read/write contract are implemented end to end (`AnalyzerHandler` → Gemini → `analysis.json` → frontend). Still open: nothing actually triggers it yet (no SQS wiring on upload, no local poller to test that flow), and it analyzes the raw video directly instead of consuming the Extractor's transcript/game-state output — see `TODO.md`.
 
 ---
 
@@ -94,7 +95,8 @@ backend/
     auth/         # JWT session token issuing/verification
     client/       # GeminiClient — Gemini File API video analysis
     handlers/     # Handler interface + RunHandler dispatcher, pipeline handlers (sampler/extractor/analyzer)
-    storage/      # S3 client (video streaming, presigned URLs, multipart uploads, audio/image uploads)
+    model/        # Shared shapes: Video, VideoMetadata (metadata.json), AnalysisResult (analysis.json)
+    storage/      # S3 client (video streaming, presigned URLs, multipart uploads, audio/image uploads, status updates)
 frontend/         # React + Vite + TypeScript SPA
 ```
 
@@ -152,10 +154,10 @@ PORT=9090 go run ./cmd/server   # or a different port
 ```bash
 echo '{"video_id":"abc123"}' | go run ./cmd/sampler
 echo '{"match_id":"abc123"}' | go run ./cmd/extractor
-echo '{"file_path":"/path/to/video.mp4","prompt":"..."}' | go run ./cmd/analyzer   # requires GEMINI_API_KEY
+echo '{"user_id":"user1","video_key":"abc123","prompt":"..."}' | go run ./cmd/analyzer   # requires GEMINI_API_KEY + a video already at user1/abc123/video.mp4 in the bucket
 ```
 
-`sampler` and `extractor` are still placeholder stubs (see `TODO.md`). `analyzer` actually calls Gemini to analyze the given video, but nothing upstream triggers it yet — no SQS wiring, and it isn't reading the Extractor's transcript/game-state output.
+`sampler` and `extractor` are still placeholder stubs (see `TODO.md`). `analyzer` reads the video straight from S3 (using `user_id`/`video_key` as the key prefix), analyzes it with Gemini, and writes `analysis.json` + a `metadata.json` status update back — but nothing upstream triggers it yet, so it has to be invoked manually like this for now.
 
 ### 3. MinIO (S3 emulation)
 

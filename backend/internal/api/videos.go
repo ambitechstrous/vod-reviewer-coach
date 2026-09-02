@@ -114,10 +114,14 @@ func (h *HttpHandler) GetVideoDetails(w http.ResponseWriter, r *http.Request) {
 
 	// Retrieve analysis if available
 	analysisBytes, err := h.s3Client.GetObject(ctx, fmt.Sprintf("%s/%s/%s", userID, videoID, storage.AnalyzerFileName))
+
+	// FIXME: error branching feels weird here
 	if err == nil {
 		var analysisResult model.AnalysisResult
 		if err := json.Unmarshal(analysisBytes, &analysisResult); err == nil {
 			response.Summary = &analysisResult.Summary
+		} else {
+			fmt.Printf("failed to unmarshall analysis result: %v", err)
 		}
 	} else if !strings.Contains(err.Error(), "not found") {
 		http.Error(w, "failed to read analysis result: "+err.Error(), http.StatusInternalServerError)

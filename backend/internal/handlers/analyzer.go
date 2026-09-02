@@ -68,6 +68,7 @@ func (h *AnalyzerHandler) Run(ctx context.Context, event Event) error {
 		return err
 	}
 
+	// TODO: Add more fields (i.e. timestamps, underlying model, etc.) to the analysis result as needed.
 	analysisResult := model.AnalysisResult{
 		Summary: resp,
 	}

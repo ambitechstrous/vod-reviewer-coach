@@ -32,8 +32,11 @@ echo '{"video_id":"abc123"}' | go run ./cmd/sampler
 # Run extractor with a payload
 echo '{"match_id":"abc123"}' | go run ./cmd/extractor
 
-# Run analyzer with a payload (local file, bypassing S3)
-echo '{"file_path":"/path/to/video.mp4","prompt":"..."}' | go run ./cmd/analyzer
+# Run analyzer with a payload — video_key is the video ID, not a full S3 key
+# (the S3 key is derived as "{user_id}/{video_key}/video.mp4")
+echo '{"user_id":"user1","video_key":"abc123","prompt":"..."}' | go run ./cmd/analyzer
+# Set ENVIRONMENT=development (see backend/.env) to skip the real Gemini call
+# and get back a canned response instead — GEMINI_API_KEY is still required.
 ```
 
 ```bash
@@ -64,14 +67,15 @@ Upload → Sampler → Extractor → Analyzer → Feedback
 - `internal/handlers/` — the `Handler` interface, `RunHandler` dispatcher, and the event-driven pipeline handlers: `SamplerHandler`, `ExtractorHandler`, `AnalyzerHandler`.
 - `internal/api/` — the `server` HTTP handler: router setup (`http.go`), auth endpoints (`auth.go`), multipart upload endpoints (`upload.go`), video list/detail endpoints (`videos.go`), and the `requireAuth` middleware (`middleware.go`).
 - `internal/auth/` — issues and verifies signed JWT session tokens (`IssueToken`/`VerifyToken`) and carries the authenticated user ID through request context. No password/identity check yet — `JWT_SECRET` env var required.
-- `internal/storage/` — `S3Client` wrapping AWS SDK v2. Hardcoded bucket is `"user-vods"`. Videos are stored per-user as `{userID}/{videoID}/video.mp4` with a sidecar `{userID}/{videoID}/metadata.json`. Provides object CRUD/listing, `GetVideo` (streaming), `PutAudio`/`PutImage`, presigned GET URLs, and the multipart upload flow (create/presign-part/complete/abort).
-- `internal/client/` — `GeminiClient` for Gemini API interactions. `AnalyzeVideo` uploads a video to Gemini's File API, polls until processed, and generates a response from a prompt. Speech-to-text / multimodal frame analysis for the extractor is not yet implemented.
+- `internal/model/` — shared response/storage shapes used by both `internal/api` and `internal/handlers`: `Video` (mirrors the frontend's `Video` type), `VideoMetadata` (the `metadata.json` sidecar shape), and `AnalysisResult` (the `analysis.json` sidecar shape, currently just `{summary}`).
+- `internal/storage/` — `S3Client` wrapping AWS SDK v2. Hardcoded bucket is `"user-vods"`. Videos are stored per-user as `{userID}/{videoID}/video.mp4`, with sidecars `metadata.json` and (once analyzed) `analysis.json` — filenames are the exported constants `VideoFileName`/`MetadataFileName`/`AnalyzerFileName`. `UpdateAnalyzerStatus` patches the `status` field of a video's `metadata.json` in place (`AnalyzerStatus`: `uploaded` → `analyzing` → `analyzed`/`error`). Also provides object CRUD/listing, `GetVideo` (streaming), `PutAudio`/`PutImage`, presigned GET URLs, and the multipart upload flow (create/presign-part/complete/abort).
+- `internal/client/` — `GeminiClient` for Gemini API interactions. `AnalyzeVideo` uploads a video to Gemini's File API, polls until processed, and generates a response from a prompt — except when `ENVIRONMENT=development`, where it short-circuits and returns a canned placeholder string instead of calling Gemini (saves tokens/time locally; `GEMINI_API_KEY` is still required to construct the client either way). Speech-to-text / multimodal frame analysis for the extractor is not yet implemented.
 
 ### Data flow between services
 
 - **Sampler** receives `{"video_id": "..."}`, streams the video from S3, and is expected to write an audio track and sampled frames back to S3.
 - **Extractor** receives `{"match_id": "..."}`, reads the Sampler's outputs, and is expected to produce a timestamped transcript (speech-to-text via Gemini) and a game state stream (multimodal frame analysis via Gemini).
-- **Analyzer** receives `{"video_key" | "file_path", "prompt"}`, and calls Gemini's video analysis to produce a text result (currently just logged — turning that into structured coaching feedback delivered back to the player is still open, see `TODO.md`).
+- **Analyzer** receives `{"user_id", "video_key" (the video ID, not a full key), "prompt"}`. It marks the video `analyzing` in `metadata.json`, streams `{user_id}/{video_key}/video.mp4` from S3 straight into Gemini (not yet reading the Extractor's transcript/game-state output), writes the result to `{user_id}/{video_key}/analysis.json`, then marks the video `analyzed`. There's no failure path yet — an error mid-run just leaves the video stuck at `analyzing` (the `AnalyzerStatusError` constant exists but nothing sets it). `GET /videos/{videoID}` (in `internal/api`) reads `analysis.json` back and returns it as the video's `summary` once present.
 
 ### Frontend (`frontend/`)
 
