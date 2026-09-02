@@ -68,17 +68,27 @@ type CompleteUploadResponse struct {
 	Status string `json:"status"`
 }
 
-// videoKey builds the S3 key a video is stored under, namespaced by the
+// keyForFile builds the S3 key a video or metadata file is stored under, namespaced by the
 // authenticated user so one user's uploads can never collide with or
 // overwrite another's. userID comes from a verified token (see
 // requireAuth), never from anything the client supplies directly.
-func videoKey(ctx context.Context, videoName string) (string, error) {
+func keyForFile(ctx context.Context, videoName, fileName string) (string, error) {
 	userID, ok := auth.UserIDFromContext(ctx)
 	if !ok {
 		return "", fmt.Errorf("unauthorized: no user ID in context")
 	}
 
-	return fmt.Sprintf("%s/%s", userID, videoName), nil
+	return fmt.Sprintf("%s/%s/%s", userID, videoName, fileName), nil
+}
+
+// TODO: Commonize constants
+func videoKey(ctx context.Context, videoName string) (string, error) {
+	return keyForFile(ctx, videoName, "video.mp4")
+}
+
+// TODO: Commonize constants
+func metadataKey(ctx context.Context, videoName string) (string, error) {
+	return keyForFile(ctx, videoName, "metadata.json")
 }
 
 // CreateUploadSession starts a multipart upload for a video and returns a presigned URL for every part the client will need to PUT directly to S3.
@@ -167,6 +177,24 @@ func (h *HttpHandler) CompleteUpload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.s3Client.CompleteMultipartUpload(r.Context(), key, req.UploadID, parts); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	metadataKey, err := metadataKey(ctx, req.VideoName)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	metadata := VideoMetadata{
+		Title:      req.VideoName,
+		Game:       "Rocket League",
+		Status:     "uploaded",
+		UploadedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+
+	if err := h.s3Client.PutJSON(r.Context(), metadataKey, metadata); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

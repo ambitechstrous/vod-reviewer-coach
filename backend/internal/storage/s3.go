@@ -1,7 +1,9 @@
 package storage
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"mime"
@@ -117,6 +119,16 @@ func (c *S3Client) GetObject(ctx context.Context, key string) ([]byte, error) {
 		return nil, fmt.Errorf("read s3 object %q: %w", key, err)
 	}
 	return data, nil
+}
+
+// PutJSON marshals v and writes it to key as application/json. Meant for
+// small sidecar objects like a video's metadata.json.
+func (c *S3Client) PutJSON(ctx context.Context, key string, v any) error {
+	data, err := json.Marshal(v)
+	if err != nil {
+		return fmt.Errorf("marshal json for %q: %w", key, err)
+	}
+	return c.put(ctx, key, bytes.NewReader(data), "application/json")
 }
 
 // GetPresignedURL returns a time-limited URL that grants read access to a single video object. Keep ttl short (5–15 min) and never log the URL.
