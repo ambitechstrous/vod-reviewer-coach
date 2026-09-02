@@ -4,13 +4,20 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/ambitechstrous/vod-reviewer-coach/internal/auth"
+	"github.com/ambitechstrous/vod-reviewer-coach/internal/handlers"
 	"github.com/ambitechstrous/vod-reviewer-coach/internal/model"
 	"github.com/ambitechstrous/vod-reviewer-coach/internal/storage"
 )
+
+// defaultAnalysisPrompt is a placeholder prompt used until the frontend (or
+// a real pipeline stage) supplies one.
+const defaultAnalysisPrompt = "Analyze this gameplay video and provide coaching feedback on decision-making, positioning, and communication. Identify recurring habits and give concrete, actionable suggestions for improvement."
 
 const (
 	// uploadPartSize is the size of every part except the last one. S3
@@ -200,11 +207,46 @@ func (h *HttpHandler) CompleteUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	userID, ok := auth.UserIDFromContext(ctx)
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(CompleteUploadResponse{
 		Key:    key,
 		Status: "uploaded",
 	})
+
+	// Trigger analysis in the background. There's no queue/Lambda trigger wired up yet (see TODO.md), so this is a local stand-in
+	if os.Getenv("ENVIRONMENT") == "development" && ok {
+		go h.triggerAnalysis(userID, req.VideoName)
+	}
+}
+
+// triggerAnalysis runs the Analyzer handler in-process, only for dev purposes
+func (h *HttpHandler) triggerAnalysis(userID, videoID string) {
+	// Use background context to avoid cancels from request context
+	ctx := context.Background()
+
+	// Initialize handler
+	analyzer, err := handlers.NewAnalyzerHandler(ctx)
+	if err != nil {
+		log.Printf("analyzer: failed to create handler for %s/%s: %v", userID, videoID, err)
+		return
+	}
+
+	payload, err := json.Marshal(handlers.AnalyzerEvent{
+		UserID:  userID,
+		VideoID: videoID,
+		Prompt:  defaultAnalysisPrompt,
+	})
+	if err != nil {
+		log.Printf("analyzer: failed to marshal event for %s/%s: %v", userID, videoID, err)
+		return
+	}
+
+	// Run the handler
+	if err := analyzer.Run(ctx, handlers.Event{Payload: payload}); err != nil {
+		log.Printf("analyzer: run failed for %s/%s: %v", userID, videoID, err)
+	}
 }
 
 // AbortUpload cancels an in-progress multipart upload, e.g. when the client gives up partway through.

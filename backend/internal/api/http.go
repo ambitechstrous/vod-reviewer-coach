@@ -45,6 +45,7 @@ func NewHttpHandler(ctx context.Context) (IHttpHandler, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	return &HttpHandler{
 		s3Client: s3Client,
 	}, nil
