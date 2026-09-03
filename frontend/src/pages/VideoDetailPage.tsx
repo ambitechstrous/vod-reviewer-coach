@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { StatusBadge } from '../components/StatusBadge'
 import { SessionExpiredError } from '../lib/api'
 import { useAuth } from '../lib/auth'
@@ -90,9 +92,11 @@ export function VideoDetailPage() {
       {video.status === 'processed' && video.summary && (
         <div className="rounded-xl border border-white/5 bg-white/[0.03] p-5">
           <h2 className="mb-2 font-medium text-white">Coaching summary</h2>
-          <p className="text-sm leading-relaxed text-slate-300">
-            {video.summary}
-          </p>
+          <div className="prose prose-invert prose-sm max-w-none prose-headings:font-semibold prose-a:text-indigo-400">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              {video.summary}
+            </ReactMarkdown>
+          </div>
         </div>
       )}
 
