@@ -1,16 +1,11 @@
 import { useRef, useState, type SubmitEvent } from 'react'
+import { SessionExpiredError } from '../lib/api'
+import { askCoach } from '../lib/chat'
+import { useAuth } from '../lib/auth'
 import type { ChatMessage } from '../types'
 
-const MOCK_REPLIES = [
-  "Looking at your recent VODs, your biggest recurring issue is over-peeking after a teammate dies nearby. Try holding the angle instead and letting them re-engage.",
-  "Your communication drops off noticeably in the second half of matches. Calling out rotations even when unsure helps your team react faster.",
-  "Economy management has been inconsistent — you've force-bought after lost pistols in two of your last three matches. Saving there would set up a stronger bonus round.",
-  "That's a good question. Once more VODs are processed I'll be able to compare trends across matches, not just within one.",
-]
-
-let nextReplyIndex = 0
-
 export function ChatPanel() {
+  const { user, logout } = useAuth()
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [draft, setDraft] = useState('')
   const [isThinking, setIsThinking] = useState(false)
@@ -24,21 +19,34 @@ export function ChatPanel() {
   function handleSubmit(e: SubmitEvent<HTMLFormElement>) {
     e.preventDefault()
     const text = draft.trim()
-    if (!text) return
+    if (!text || !user) return
 
     setMessages((prev) => [...prev, { id: nextId(), role: 'user', text }])
     setDraft('')
     setIsThinking(true)
 
-    setTimeout(() => {
-      const reply = MOCK_REPLIES[nextReplyIndex % MOCK_REPLIES.length]
-      nextReplyIndex += 1
-      setMessages((prev) => [
-        ...prev,
-        { id: nextId(), role: 'assistant', text: reply },
-      ])
-      setIsThinking(false)
-    }, 700)
+    askCoach(text, user.token)
+      .then((answer) => {
+        setMessages((prev) => [
+          ...prev,
+          { id: nextId(), role: 'assistant', text: answer },
+        ])
+      })
+      .catch((err) => {
+        if (err instanceof SessionExpiredError) {
+          logout()
+          return
+        }
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: nextId(),
+            role: 'assistant',
+            text: "Sorry, I couldn't answer that — try again in a moment.",
+          },
+        ])
+      })
+      .finally(() => setIsThinking(false))
   }
 
   return (
@@ -89,7 +97,7 @@ export function ChatPanel() {
         />
         <button
           type="submit"
-          disabled={!draft.trim()}
+          disabled={!draft.trim() || isThinking}
           className="rounded-lg bg-indigo-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-400 disabled:cursor-not-allowed disabled:opacity-40"
         >
           Send
