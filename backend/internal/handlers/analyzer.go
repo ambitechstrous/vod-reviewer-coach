@@ -9,6 +9,7 @@ import (
 	"github.com/ambitechstrous/vod-reviewer-coach/internal/client"
 	"github.com/ambitechstrous/vod-reviewer-coach/internal/model"
 	"github.com/ambitechstrous/vod-reviewer-coach/internal/storage"
+	"github.com/aws/aws-lambda-go/events"
 )
 
 type AnalyzerHandler struct {
@@ -38,9 +39,41 @@ func NewAnalyzerHandler(ctx context.Context) (*AnalyzerHandler, error) {
 	}, nil
 }
 
+// Run handles two shapes of invocation: a direct/manual invoke where
+// event.Payload is an AnalyzerEvent, and an SQS-triggered invoke where
+// event.Payload is the SQS envelope Lambda hands the function
+// ({"Records":[{"body": "<AnalyzerEvent JSON>", ...}, ...]}) -- which is
+// also what the Lambda console's "Amazon SQS" test template produces.
+// Messages are processed one at a time; the first failure stops the batch
+// and is returned so the SQS trigger retries/DLQs the whole invocation.
 func (h *AnalyzerHandler) Run(ctx context.Context, event Event) error {
+	for _, payload := range extractPayloads(event.Payload) {
+		if err := h.analyze(ctx, payload); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// extractPayloads returns the individual AnalyzerEvent JSON payloads to
+// process. If raw parses as an SQS event with at least one record, each
+// record's Body is unwrapped as one payload; otherwise raw itself is
+// treated as a single AnalyzerEvent.
+func extractPayloads(raw json.RawMessage) []json.RawMessage {
+	var sqsEvent events.SQSEvent
+	if err := json.Unmarshal(raw, &sqsEvent); err == nil && len(sqsEvent.Records) > 0 {
+		payloads := make([]json.RawMessage, len(sqsEvent.Records))
+		for i, record := range sqsEvent.Records {
+			payloads[i] = json.RawMessage(record.Body)
+		}
+		return payloads
+	}
+	return []json.RawMessage{raw}
+}
+
+func (h *AnalyzerHandler) analyze(ctx context.Context, payload json.RawMessage) error {
 	var analyzerEvent AnalyzerEvent
-	if err := json.Unmarshal(event.Payload, &analyzerEvent); err != nil {
+	if err := json.Unmarshal(payload, &analyzerEvent); err != nil {
 		return err
 	}
 
