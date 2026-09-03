@@ -34,12 +34,15 @@ type IHttpHandler interface {
 	GetUserVideos(w http.ResponseWriter, r *http.Request)
 	// GetVideoDetails gets the details of a specific video for a given user
 	GetVideoDetails(w http.ResponseWriter, r *http.Request)
+	// Chat answers a question about patterns across the user's analyzed videos.
+	Chat(w http.ResponseWriter, r *http.Request)
 }
 
 type HttpHandler struct {
-	s3Client  *storage.S3Client
-	sqsClient *client.SQSClient
-	srv       *http.Server
+	s3Client     *storage.S3Client
+	sqsClient    *client.SQSClient
+	geminiClient *client.GeminiClient
+	srv          *http.Server
 }
 
 func NewHttpHandler(ctx context.Context) (IHttpHandler, error) {
@@ -53,9 +56,15 @@ func NewHttpHandler(ctx context.Context) (IHttpHandler, error) {
 		return nil, err
 	}
 
+	geminiClient, err := client.NewGeminiClient(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	return &HttpHandler{
-		s3Client:  s3Client,
-		sqsClient: sqsClient,
+		s3Client:     s3Client,
+		sqsClient:    sqsClient,
+		geminiClient: geminiClient,
 	}, nil
 }
 
@@ -87,6 +96,7 @@ func (h *HttpHandler) SetUpRouter() *http.Server {
 		r.Post("/uploads/abort", h.AbortUpload)
 		r.Get("/videos", h.GetUserVideos)
 		r.Get("/videos/{videoID}", h.GetVideoDetails)
+		r.Post("/chat", h.Chat)
 	})
 
 	port := os.Getenv("PORT")
@@ -118,9 +128,9 @@ func allowedOrigins() []string {
 }
 
 func (h *HttpHandler) Start() {
-	fmt.Printf("analyzer listening on %s\n", h.srv.Addr)
+	fmt.Printf("server listening on %s\n", h.srv.Addr)
 	if err := h.srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
-		fmt.Fprintf(os.Stderr, "analyzer: %v\n", err)
+		fmt.Fprintf(os.Stderr, "server: %v\n", err)
 		os.Exit(1)
 	}
 }
