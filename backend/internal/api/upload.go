@@ -275,7 +275,7 @@ func (h *HttpHandler) triggerAnalysis(userID, videoID string) {
 
 		// Run the handler
 		if err := analyzer.Run(ctx, handlers.Event{Payload: payload}); err != nil {
-			log.Printf("analyzer: run failed: %w", err)
+			log.Printf("analyzer: run failed: %v", err)
 		}
 	} else {
 		h.sqsClient.SendMessage(ctx, string(payload))

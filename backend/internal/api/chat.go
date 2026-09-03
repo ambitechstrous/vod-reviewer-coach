@@ -44,6 +44,7 @@ func (h *HttpHandler) Chat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	fmt.Println("getting video summaries")
 	summaries, err := h.videoSummaries(ctx, userID)
 	if err != nil {
 		http.Error(w, "failed to gather video summaries: "+err.Error(), http.StatusInternalServerError)
@@ -55,6 +56,7 @@ func (h *HttpHandler) Chat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	fmt.Println("analyzing summaries...")
 	answer, err := h.geminiClient.AnalyzeSummaries(ctx, summaries, req.Question)
 	if err != nil {
 		http.Error(w, "failed to analyze summaries: "+err.Error(), http.StatusInternalServerError)
