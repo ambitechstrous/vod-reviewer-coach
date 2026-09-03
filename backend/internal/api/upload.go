@@ -216,36 +216,8 @@ func (h *HttpHandler) CompleteUpload(w http.ResponseWriter, r *http.Request) {
 	})
 
 	// Trigger analysis in the background. There's no queue/Lambda trigger wired up yet (see TODO.md), so this is a local stand-in
-	if os.Getenv("ENVIRONMENT") == "development" && ok {
+	if ok {
 		go h.triggerAnalysis(userID, req.VideoName)
-	}
-}
-
-// triggerAnalysis runs the Analyzer handler in-process, only for dev purposes
-func (h *HttpHandler) triggerAnalysis(userID, videoID string) {
-	// Use background context to avoid cancels from request context
-	ctx := context.Background()
-
-	// Initialize handler
-	analyzer, err := handlers.NewAnalyzerHandler(ctx)
-	if err != nil {
-		log.Printf("analyzer: failed to create handler for %s/%s: %v", userID, videoID, err)
-		return
-	}
-
-	payload, err := json.Marshal(handlers.AnalyzerEvent{
-		UserID:  userID,
-		VideoID: videoID,
-		Prompt:  defaultAnalysisPrompt,
-	})
-	if err != nil {
-		log.Printf("analyzer: failed to marshal event for %s/%s: %v", userID, videoID, err)
-		return
-	}
-
-	// Run the handler
-	if err := analyzer.Run(ctx, handlers.Event{Payload: payload}); err != nil {
-		log.Printf("analyzer: run failed for %s/%s: %v", userID, videoID, err)
 	}
 }
 
@@ -276,4 +248,36 @@ func (h *HttpHandler) AbortUpload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusOK)
+}
+
+// triggerAnalysis runs the Analyzer handler in-process, only for dev purposes
+func (h *HttpHandler) triggerAnalysis(userID, videoID string) {
+	// Use background context to avoid cancels from request context
+	ctx := context.Background()
+
+	payload, err := json.Marshal(handlers.AnalyzerEvent{
+		UserID:  userID,
+		VideoID: videoID,
+		Prompt:  defaultAnalysisPrompt,
+	})
+	if err != nil {
+		log.Printf("analyzer: failed to marshal event for %s/%s: %v", userID, videoID, err)
+		return
+	}
+
+	if os.Getenv("SQS_QUEUE_URL") == "" {
+		// Initialize handler
+		analyzer, err := handlers.NewAnalyzerHandler(ctx)
+		if err != nil {
+			log.Printf("analyzer: failed to create handler for %s/%s: %v", userID, videoID, err)
+			return
+		}
+
+		// Run the handler
+		if err := analyzer.Run(ctx, handlers.Event{Payload: payload}); err != nil {
+			log.Printf("analyzer: run failed: %w", err)
+		}
+	} else {
+		h.sqsClient.SendMessage(ctx, string(payload))
+	}
 }

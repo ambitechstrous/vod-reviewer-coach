@@ -62,16 +62,22 @@ type CompletedPart struct {
 	ETag       string
 }
 
-func NewS3Client(ctx context.Context, bucket string) (*S3Client, error) {
+func NewS3Client(ctx context.Context) (*S3Client, error) {
+	// Get bucket from env var, defaulting to user-vods if not set.
+	bucket := os.Getenv("S3_BUCKET_NAME")
+	if bucket == "" {
+		bucket = "user-vods"
+	}
+
 	cfg, err := config.LoadDefaultConfig(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("load aws config: %w", err)
 	}
 
 	client := s3.NewFromConfig(cfg, func(o *s3.Options) {
-		// Override to local S3 instance for local development environments
-		env := os.Getenv("ENVIRONMENT")
-		if env == "development" || env == "test" {
+		// Fallback to local S3 instance if AWS_PROFILE isn't set. Helpful for local development environments.
+		awsProfile := os.Getenv("AWS_PROFILE")
+		if awsProfile == "" {
 			o.UsePathStyle = true
 			o.BaseEndpoint = aws.String("http://localhost:9000")
 

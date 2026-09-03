@@ -28,7 +28,7 @@ func NewAnalyzerHandler(ctx context.Context) (*AnalyzerHandler, error) {
 		return nil, err
 	}
 
-	s3Client, err := storage.NewS3Client(ctx, "user-vods")
+	s3Client, err := storage.NewS3Client(ctx)
 	if err != nil {
 		return nil, err
 	}

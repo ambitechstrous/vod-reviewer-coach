@@ -20,14 +20,11 @@ type GeminiClient struct {
 }
 
 func NewGeminiClient(ctx context.Context) (*GeminiClient, error) {
-	// Don't waste tokens on Gemini for local testing. Pass nil client, impl will know what to do.
-	if os.Getenv("ENVIRONMENT") == "development" {
-		return &GeminiClient{client: nil}, nil
-	}
-
+	// If Gemini API Key isn't set, we fall back to a mock client that returns canned responses. This is useful for local development and testing without incurring token costs.
 	apiKey := os.Getenv("GEMINI_API_KEY")
 	if apiKey == "" {
-		return nil, fmt.Errorf("GEMINI_API_KEY is not set")
+		fmt.Println("GEMINI_API_KEY not set; falling back to mock Gemini client")
+		return &GeminiClient{client: nil}, nil
 	}
 	c, err := genai.NewClient(ctx, option.WithAPIKey(apiKey))
 	if err != nil {

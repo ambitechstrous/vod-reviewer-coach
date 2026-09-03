@@ -17,7 +17,7 @@ type SamplerEvent struct {
 }
 
 func NewSamplerHandler(ctx context.Context) (*SamplerHandler, error) {
-	s3Client, err := storage.NewS3Client(ctx, "user-vods")
+	s3Client, err := storage.NewS3Client(ctx)
 	if err != nil {
 		return nil, err
 	}

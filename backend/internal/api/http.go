@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/ambitechstrous/vod-reviewer-coach/internal/client"
 	"github.com/ambitechstrous/vod-reviewer-coach/internal/storage"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -36,18 +37,25 @@ type IHttpHandler interface {
 }
 
 type HttpHandler struct {
-	s3Client *storage.S3Client
-	srv      *http.Server
+	s3Client  *storage.S3Client
+	sqsClient *client.SQSClient
+	srv       *http.Server
 }
 
 func NewHttpHandler(ctx context.Context) (IHttpHandler, error) {
-	s3Client, err := storage.NewS3Client(ctx, "user-vods")
+	s3Client, err := storage.NewS3Client(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	sqsClient, err := client.NewSQSClient(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	return &HttpHandler{
-		s3Client: s3Client,
+		s3Client:  s3Client,
+		sqsClient: sqsClient,
 	}, nil
 }
 
