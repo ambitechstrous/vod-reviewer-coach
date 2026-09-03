@@ -10,6 +10,7 @@ import (
 	"syscall"
 
 	"github.com/aws/aws-lambda-go/lambda"
+	"github.com/joho/godotenv"
 )
 
 // Event is the generic input. Payload holds the raw trigger body
@@ -38,6 +39,12 @@ func RunHandler(newHandlerFn func(ctx context.Context) (Handler, error)) {
 			return handler.Run(ctx, Event{Payload: raw})
 		})
 		return
+	} else {
+		// Load local env vars from .env if we are not on a Lambda runtime
+		if err := godotenv.Load(); err != nil {
+			fmt.Fprintf(os.Stderr, "analyzer: failed to load .env file: %v\n", err)
+			os.Exit(1)
+		}
 	}
 
 	// Standalone: honour OS signals for graceful shutdown.
