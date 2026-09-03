@@ -75,9 +75,10 @@ func NewS3Client(ctx context.Context) (*S3Client, error) {
 	}
 
 	client := s3.NewFromConfig(cfg, func(o *s3.Options) {
-		// Fallback to local S3 instance if AWS_PROFILE isn't set. Helpful for local development environments.
-		awsProfile := os.Getenv("AWS_PROFILE")
-		if awsProfile == "" {
+		// Check if we're running on AWS compute or running locally. Use MINIO for local dev.
+		runningInLambda := os.Getenv("AWS_LAMBDA_FUNCTION_NAME") != ""
+		usingAWSProfile := os.Getenv("AWS_PROFILE") != ""
+		if !runningInLambda && !usingAWSProfile {
 			o.UsePathStyle = true
 			o.BaseEndpoint = aws.String("http://localhost:9000")
 
